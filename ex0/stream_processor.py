@@ -27,7 +27,7 @@ class NumericProcessor(DataProcessor):
         total = sum(data_list)
         avg = total / count
 
-        return self.format_output(
+        return super().format_output(
             f"Processed {count} numeric values, sum={total}, avg={avg:.1f}"
         )
 
@@ -48,7 +48,7 @@ class TextProcessor(DataProcessor):
         if not self.validate(data):
             raise ValueError("Invalid text data: must be a string")
 
-        return self.format_output(
+        return super().format_output(
             f"Processed text: {len(data)} "
             f"characters, {len(data.split())} words"
         )
@@ -66,7 +66,7 @@ class LogProcessor(DataProcessor):
         level, message = map(str.strip, data.split(':'))
         log_type = "ALERT" if level.upper() in ("ERROR", "WARNING") else level
 
-        return self.format_output(
+        return super().format_output(
             f"[{log_type}] {level} level detected: {message}"
         )
 
