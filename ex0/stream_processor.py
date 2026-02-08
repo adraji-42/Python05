@@ -1,9 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Tuple
+from typing import Any
 
 
 class DataProcessor(ABC):
-
     @abstractmethod
     def process(self, data: Any) -> str:
         pass
@@ -17,18 +16,18 @@ class DataProcessor(ABC):
 
 
 class NumericProcessor(DataProcessor):
-
     def process(self, data: Any) -> str:
         if not self.validate(data):
             raise ValueError(
-                "Invalid numeric data, the data muste be all numeric"
+                "Invalid numeric data: must be numeric or list of numbers"
             )
 
-        count = len(data)
-        total = sum(data)
-        avg = total / count if count > 0 else 0
+        data_list = data if isinstance(data, list) else [data]
+        count = len(data_list)
+        total = sum(data_list)
+        avg = total / count
 
-        return super().format_output(
+        return self.format_output(
             f"Processed {count} numeric values, sum={total}, avg={avg:.1f}"
         )
 
@@ -36,24 +35,22 @@ class NumericProcessor(DataProcessor):
         if isinstance(data, (int, float)):
             return True
 
-        if data and isinstance(data, list):
-            if all(isinstance(x, (int, float)) for x in data):
-                return True
-
-        return False
+        return (
+            isinstance(data, list)
+            and len(data) > 0
+            and all(isinstance(x, (int, float)) for x in data)
+        )
 
 
 class TextProcessor(DataProcessor):
 
     def process(self, data: Any) -> str:
-        if self.validate(data):
-            raise ValueError("Invalid text data, the data muste be string")
+        if not self.validate(data):
+            raise ValueError("Invalid text data: must be a string")
 
-        char_num = len(data)
-        words_num = len(data.split())
-
-        return super().format_output(
-            f"Processed text: {char_num} characters, {words_num} words"
+        return self.format_output(
+            f"Processed text: {len(data)} "
+            f"characters, {len(data.split())} words"
         )
 
     def validate(self, data: Any) -> bool:
@@ -64,93 +61,65 @@ class LogProcessor(DataProcessor):
 
     def process(self, data: Any) -> str:
         if not self.validate(data):
-            raise ValueError(
-                "Invalid log data, the data muste be with this formul:\n"
-                "\tALERT: level detected"
-            )
+            raise ValueError("Invalid log format. Expected 'LEVEL: MESSAGE'")
 
-        alert, level = map(str.strip, data.split(':'))
-        log_type = "ALERT" if alert.upper() in ("ERROR", "WARNING") else alert
+        level, message = map(str.strip, data.split(':'))
+        log_type = "ALERT" if level.upper() in ("ERROR", "WARNING") else level
 
-        return super().format_output(
-            f"[{log_type}] {alert} level detected: {level}"
+        return self.format_output(
+            f"[{log_type}] {level} level detected: {message}"
         )
 
     def validate(self, data: Any) -> bool:
-        return isinstance(data, str) and data.count(':') != 1 in data
+        return isinstance(data, str) and data.count(':') == 1
 
 
 def main() -> None:
-
     print("=== CODE NEXUS - DATA PROCESSOR FOUNDATION ===")
 
-    numeric_data: List[int] = [1, 2, 3, 4, 5]
+    processors = [
+        (NumericProcessor(), [1, 2, 3, 4, 5], "Numeric"),
+        (TextProcessor(), "Hello Nexus World", "Text"),
+        (LogProcessor(), "ERROR: Connection timeout", "Log")
+    ]
 
     try:
-        print("\nInitializing Numeric Processor...")
-        print(f"Processing data: {numeric_data}")
-
-        output = NumericProcessor.process(numeric_data)
-    except ValueError as e:
-        print(f"Validation: {e}")
+        for proc, data, name in processors:
+            print(f"\nInitializing {name} Processor...")
+            try:
+                print(f"Processing data: {data}")
+                output = proc.process(data)
+            except ValueError as e:
+                print(f"Error: {e}")
+            except Exception as e:
+                print(f"Unexpected Error: {e}")
+            else:
+                print(f"Validation: {name} data verified")
+                print(output)
     except Exception as e:
         print(f"Unexpected Error: {e}")
-    else:
-        print("Validation: Numeric data verified")
-        print(output)
-
-    str_data: str = "Hello Nexus World"
-
-    try:
-        print("\nInitializing text Processor...")
-        print(f"Processing data: {str_data}")
-
-        output = TextProcessor.process(str_data)
-    except ValueError as e:
-        print(f"Validation: {e}")
-    except Exception as e:
-        print(f"Unexpected Error: {e}")
-    else:
-        print("Validation: Text data verified")
-        print(output)
-
-    log_data: str = "ERROR: Connection timeout"
-
-    try:
-        print("\nInitializing Log Processor...")
-        print(f"Processing data: {log_data}")
-
-        output = LogProcessor.process(log_data)
-    except ValueError as e:
-        print(f"Validation: {e}")
-    except Exception as e:
-        print(f"Unexpected Error: {e}")
-    else:
-        print("Validation: Numeric data verified")
-        print(output)
 
     print("\n=== Polymorphic Processing Demo ===")
-
-    multiple_data: List[Tuple[Any: DataProcessor]] = [
-        ([1, 21, 31], NumericProcessor),
-        ("This project is perfect", TextProcessor),
+    multiple_data = [
+        (NumericProcessor(), [1, 21, 31]),
+        (TextProcessor(), "This project is perfect"),
         (
-            "WARNING: You must press the outstanding flag to save your life",
-            LogProcessor
+            LogProcessor(),
+            "INFO: You must press the outstanding flag to save your life"
         )
     ]
 
     try:
-        print("\nProcessing multiple data types through same interface...")
-        for i, data, processor in enumerate(multiple_data):
-            output = processor(data)
-            print(f"Result {i}: {output}")
-    except ValueError as e:
-        print(f"Bad Data: {e}")
+        for i, (proc, data) in enumerate(multiple_data, 1):
+            try:
+                result = proc.process(data)
+                print(f"Result {i}: {result}")
+            except ValueError as e:
+                print(f"Item {i} failed: {e}")
+            except Exception as e:
+                print(f"In Item {i}: Unexpected Error: {e}")
     except Exception as e:
         print(f"Unexpected Error: {e}")
-
-    print("Foundation systems online. Nexus ready for advanced streams")
 
 
 if __name__ == "__main__":
