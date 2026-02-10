@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Union, List
 
 
 class DataProcessor(ABC):
@@ -16,7 +16,7 @@ class DataProcessor(ABC):
 
 
 class NumericProcessor(DataProcessor):
-    def process(self, data: Any) -> str:
+    def process(self, data: Union[int | List[int]]) -> str:
         if not self.validate(data):
             raise ValueError(
                 "Invalid numeric data: must be numeric or list of numbers"
@@ -28,10 +28,11 @@ class NumericProcessor(DataProcessor):
         avg = total / count
 
         return super().format_output(
-            f"Processed {count} numeric values, sum={total}, avg={avg:.1f}"
+            f"Processed {count:.0f} numeric values, "
+            f"sum={total:.0f}, avg={avg:.1f}"
         )
 
-    def validate(self, data: Any) -> bool:
+    def validate(self, data: Union[int | List[int]]) -> bool:
         if isinstance(data, (int, float)):
             return True
 
@@ -44,7 +45,7 @@ class NumericProcessor(DataProcessor):
 
 class TextProcessor(DataProcessor):
 
-    def process(self, data: Any) -> str:
+    def process(self, data: str) -> str:
         if not self.validate(data):
             raise ValueError("Invalid text data: must be a string")
 
@@ -53,13 +54,13 @@ class TextProcessor(DataProcessor):
             f"characters, {len(data.split())} words"
         )
 
-    def validate(self, data: Any) -> bool:
+    def validate(self, data: str) -> bool:
         return isinstance(data, str)
 
 
 class LogProcessor(DataProcessor):
 
-    def process(self, data: Any) -> str:
+    def process(self, data: str) -> str:
         if not self.validate(data):
             raise ValueError("Invalid log format. Expected 'LEVEL: MESSAGE'")
 
@@ -70,7 +71,7 @@ class LogProcessor(DataProcessor):
             f"[{log_type}] {level} level detected: {message}"
         )
 
-    def validate(self, data: Any) -> bool:
+    def validate(self, data: str) -> bool:
         return isinstance(data, str) and data.count(':') == 1
 
 
