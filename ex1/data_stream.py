@@ -41,7 +41,7 @@ class SensorStream(DataStream):
     def __init__(self, stream_id: str) -> None:
 
         super().__init__(stream_id, "Environmental Data")
-        self.factor_readings: List[Dict[str, Any]] = []
+        self.temp_history: List[float] = []
         self.critical_alerts: int = 0
 
     def process_batch(self, data_batch: List[Dict[str, Any]]) -> str:
@@ -54,11 +54,14 @@ class SensorStream(DataStream):
         }
 
         for factor, values in filtered.items():
-            self.critical_alerts += sum(
-                1 for v in values if intervals[factor](v)
-            )
+            if factor in intervals:
+                self.critical_alerts += sum(
+                    1 for v in values if intervals[factor](v)
+                )
 
-        self.factor_readings.extend(data_batch)
+        if "temp" in filtered:
+            self.temp_history.extend(filtered["temp"])
+
         self.total_processed += len(data_batch)
 
         temp_list = filtered.get("temp", [])
@@ -82,12 +85,13 @@ class SensorStream(DataStream):
         }
 
         for reading in data_batch:
-            for factor in factors:
-                if factor in reading:
-                    try:
-                        factors[factor].append(float(reading[factor]))
-                    except (ValueError, TypeError):
-                        self.critical_alerts += 1
+            if isinstance(reading, dict):
+                for factor in factors:
+                    if factor in reading:
+                        try:
+                            factors[factor].append(float(reading[factor]))
+                        except (ValueError, TypeError):
+                            self.critical_alerts += 1
 
         if criteria == "high-priority":
             factors["temp"] = [t for t in factors["temp"] if t < 18 or t > 27]
@@ -105,12 +109,8 @@ class SensorStream(DataStream):
         stats = super().get_stats()
         stats["critical_alerts"] = self.critical_alerts
         avg: float = 0.0
-        if self.factor_readings:
-            avg = (
-                sum(
-                    self.factor_readings.values()
-                ) / len(self.factor_readings.values())
-            )
+        if self.temp_history:
+            avg = sum(self.temp_history) / len(self.temp_history)
         stats["avg_temperature"] = avg
         return stats
 
@@ -130,24 +130,24 @@ class TransactionStream(DataStream):
 
         for trans in filtered:
             try:
-                price = int(trans.get("sell", None))
+                if "sell" in trans:
+                    price = int(trans["sell"])
+                    if price > 100:
+                        self.large_transactions += 1
+                    flow += price
+                    operations += 1
             except (ValueError, TypeError):
-                pass
-            else:
-                if price > 100:
-                    self.large_transactions += 1
-                flow += price
-                operations += 1
+                self.error_count += 1
 
             try:
-                price = int(trans.get("buy", None))
+                if "buy" in trans:
+                    price = int(trans["buy"])
+                    if price > 100:
+                        self.large_transactions += 1
+                    flow -= price
+                    operations += 1
             except (ValueError, TypeError):
-                pass
-            else:
-                if price > 100:
-                    self.large_transactions += 1
-                flow -= price
-                operations += 1.
+                self.error_count += 1
 
         self.net_flow += flow
         self.total_processed += len(data_batch)
@@ -196,11 +196,11 @@ class EventStream(DataStream):
         filtered = self.filter_data(data_batch, "high-priority")
 
         for event in filtered:
-
-            self.events_by_type[event] = (
-                self.events_by_type.get(event, 0) + 1
+            event_str = str(event)
+            self.events_by_type[event_str] = (
+                self.events_by_type.get(event_str, 0) + 1
             )
-            if event in errors:
+            if event_str in errors:
                 error_count += 1
 
         self.total_processed += len(data_batch)
@@ -219,38 +219,36 @@ class EventStream(DataStream):
         events = ["login", "logout", "sign in", "sign up"]
         errors = ["error", "400", "401", "402", "403", "404", "408"]
 
+        valid_events = [str(e) for e in data_batch if e is not None]
+
         if criteria == "high-priority":
             return [
-                e for e in data_batch
-                if str(e) and (e in events or e in errors)
+                e for e in valid_events
+                if e in events or e in errors
             ]
 
-        return [
-                e for e in data_batch
-                if str(e) and e in events
-        ]
-
-    def get_stats(self) -> Dict[str, Union[str, int, float]]:
-        stats = super().get_stats()
-        stats["events_by_type"] = str(self.events_by_type)
-        return stats
+        return [e for e in valid_events if e in events]
 
 
 class StreamProcessor:
 
     def __init__(self) -> None:
-        self.__streams: List[DataStream] = []
+        self.__streams: Dict[DataStream, List[Any]] = {}
 
-    def add_stream(self, stream: DataStream) -> None:
+    def add_stream(self, stream: DataStream, batches: List[Any]) -> None:
         if isinstance(stream, DataStream):
-            self.__streams.append(stream)
+            if stream in self.__streams:
+                self.__streams[stream].extend(batches)
+            else:
+                self.__streams[stream] = batches
 
-    def process_all_streams(self, batches: List[List[Any]]) -> List[str]:
+    def process_all_streams(self) -> List[str]:
         results: List[str] = []
-        for i, stream in enumerate(self.__streams):
+
+        for i, stream, batches in enumerate(self.__streams.items()):
             if i < len(batches):
                 try:
-                    results.append(stream.process_batch(batches[i]))
+                    results.append(stream.process_batch(batches))
                 except Exception:
                     results.append(f"Error in stream {stream.stream_id}")
         return results
@@ -263,32 +261,35 @@ def main() -> None:
     print("=== CODE NEXUS - POLYMORPHIC STREAM SYSTEM ===\n")
 
     processor = StreamProcessor()
-
-    streams = [
+    streams: List[DataStream] = [
         SensorStream("SENSOR_001"),
         TransactionStream("TRANS_001"),
         EventStream("EVENT_001")
     ]
-
-    for stream in streams:
-        processor.add_stream(stream)
-
     all_data_batches: List[List[Any]] = [
-        [{"temp": 30}, {"humidity": 74}],
+        [{"temp": 30}, {"humidity": 74}, {"pressure": 1013}],
         [{"buy": 100}, {"sell": 250}],
         ["error", "404", "login"]
     ]
 
+    for stream in streams:
+        processor.add_stream(stream, all_data_batches)
+
     print("Running Polymorphic Processing through StreamProcessor...")
-    results = processor.process_all_streams(all_data_batches)
+    try:
+        results = processor.process_all_streams(all_data_batches)
+    except Exception as e:
+        print(f"Unexpected Error: {e}")
 
     for res in results:
         print(f"[*] {res}")
 
     print("\nFinal Statistics Summary:")
     for stats in processor.get_all_stats():
-        print(f"Stream {stats['stream_id']} ({stats['stream_type']}): "
-              f"Processed: {stats['total_processed']}")
+        print(
+            f"Stream {stats['stream_id']} ({stats['stream_type']}): "
+            f"Processed: {stats['total_processed']}"
+        )
 
 
 if __name__ == "__main__":
