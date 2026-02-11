@@ -17,7 +17,8 @@ class DataStream(ABC):
         pass
 
     def filter_data(
-        self, data_batch: List[Any], criteria: Optional[str] = None
+        self, data_batch: List[Any],
+        criteria: Optional[str] = "normal-priority"
     ) -> List[Any]:
 
         if criteria is None:
@@ -46,11 +47,10 @@ class SensorStream(DataStream):
 
     def process_batch(self, data_batch: List[Dict[str, Any]]) -> str:
 
-        filtered = self.filter_data(data_batch, None)
+        filtered = self.filter_data(data_batch)
         intervals = {
             "temp": lambda x: x < 18 or x > 27,
             "humidity": lambda x: x < 30 or x > 60,
-            "pressure": lambda x: x < 900 or x > 1100
         }
 
         for factor, values in filtered.items():
@@ -62,7 +62,7 @@ class SensorStream(DataStream):
         if "temp" in filtered:
             self.temp_history.extend(filtered["temp"])
 
-        self.total_processed += len(data_batch)
+        self.total_processed += len(filtered)
 
         temp_list = filtered.get("temp", [])
         avg_temp = sum(temp_list) / len(temp_list) if temp_list else 0.0
@@ -75,13 +75,12 @@ class SensorStream(DataStream):
     def filter_data(
         self,
         data_batch: List[Dict[str, Any]],
-        criteria: Optional[str] = None
+        criteria: Optional[str] = "normal-priority"
     ) -> Dict[str, List[float]]:
 
         factors: Dict[str, List[float]] = {
             "temp": [],
             "humidity": [],
-            "pressure": []
         }
 
         for reading in data_batch:
@@ -91,15 +90,12 @@ class SensorStream(DataStream):
                         try:
                             factors[factor].append(float(reading[factor]))
                         except (ValueError, TypeError):
-                            self.critical_alerts += 1
+                            self.error_count += 1
 
         if criteria == "high-priority":
             factors["temp"] = [t for t in factors["temp"] if t < 18 or t > 27]
             factors["humidity"] = [
                 h for h in factors["humidity"] if h < 30 or h > 60
-            ]
-            factors["pressure"] = [
-                p for p in factors["pressure"] if p < 900 or p > 1100
             ]
 
         return factors
@@ -124,7 +120,7 @@ class TransactionStream(DataStream):
 
     def process_batch(self, data_batch: List[Any]) -> str:
 
-        filtered = self.filter_data(data_batch, "high-priority")
+        filtered = self.filter_data(data_batch)
         operations: int = 0
         flow: int = 0
 
@@ -150,7 +146,7 @@ class TransactionStream(DataStream):
                 self.error_count += 1
 
         self.net_flow += flow
-        self.total_processed += len(data_batch)
+        self.total_processed += len(filtered)
         return (
             f"Transaction analysis: {operations} operations, "
             f"net flow: {flow:+} units"
@@ -159,7 +155,7 @@ class TransactionStream(DataStream):
     def filter_data(
         self,
         data_batch: List[Dict[str, float]],
-        criteria: Optional[str] = None
+        criteria: Optional[str] = "normal-priority"
     ) -> List[Dict[str, float]]:
 
         transactions: List[Dict[str, Any]] = [
@@ -167,11 +163,17 @@ class TransactionStream(DataStream):
             if isinstance(t, dict) and ("buy" in t or "sell" in t)
         ]
 
+        for t in transactions:
+            if t.get("buy", 0) < 0:
+                t.pop("buy", None)
+            if t.get("sell", 0) < 0:
+                t.pop("sell", None)
+
         if criteria == "high-priority":
             for t in transactions:
-                if t.get("buy", 0) < 0:
+                if t.get("buy", 0) <= 100:
                     t.pop("buy", None)
-                if t.get("sell", 0) < 0:
+                if t.get("sell", 0) <= 100:
                     t.pop("sell", None)
 
         return transactions
@@ -193,7 +195,7 @@ class EventStream(DataStream):
     def process_batch(self, data_batch: List[str]) -> str:
         error_count: int = 0
         errors = ["error", "400", "401", "402", "403", "404", "408"]
-        filtered = self.filter_data(data_batch, "high-priority")
+        filtered = self.filter_data(data_batch)
 
         for event in filtered:
             e_str = str(event)
@@ -204,23 +206,24 @@ class EventStream(DataStream):
             if e_str in errors:
                 error_count += 1
 
-        self.total_processed += len(data_batch)
+        self.total_processed += len(filtered)
 
         msg = f"{error_count} error{'s' if error_count != 1 else ''} detected"
 
         return f"Event analysis: {len(data_batch)} events, {msg}"
 
     def filter_data(
-        self, data_batch: List[Any], criteria: Optional[str] = None
+        self, data_batch: List[Any],
+        criteria: Optional[str] = "normal-priority"
     ) -> List[str]:
 
         events = ["login", "logout", "sign in", "sign up"]
         errors = ["error", "400", "401", "402", "403", "404", "408"]
 
-        valid = [str(e) for e in data_batch if e is not None]
+        valid = [str(e) for e in data_batch if e in events or e in errors]
 
         if criteria == "high-priority":
-            return [e for e in valid if e in events or e in errors]
+            return [e for e in valid if e in errors]
 
         return [e for e in valid if e in events]
 
@@ -237,17 +240,48 @@ class StreamProcessor:
             else:
                 self.__streams[stream] = batches
 
-    def process_all_streams(self) -> List[str]:
-        results: List[str] = []
-        for stream, batches in self.__streams.items():
-            try:
-                results.append(stream.process_batch(batches))
-            except Exception:
-                results.append(f"Error in stream {stream.stream_id}")
-        return results
+    def process_all_streams(self) -> None:
 
-    def get_all_stats(self) -> List[Dict[str, Union[str, int, float]]]:
-        return [s.get_stats() for s in self.__streams.keys()]
+        for stream, data_batch in self.__streams.items():
+            try:
+                print(
+                    f"Initializing {stream.__class__.__name__[0:-6]} Stream..."
+                )
+                print(
+                    f"Stream ID: {stream.stream_id}, "
+                    f"Type: {stream.stream_type}"
+                )
+                print(
+                    "Processing sensor batch: "
+                    f"{stream.filter_data(data_batch)}"
+                )
+                print(f"{stream.process_batch(data_batch)}\n")
+                self.add_stream(stream, data_batch)
+            except Exception as e:
+                print(f"Error in stream {stream.stream_id}: {e}\n")
+
+    def get_all_processed_number(self) -> Dict[DataStream, int]:
+        return {
+            stream: stream.total_processed for stream in self.__streams
+        }
+
+    def high_priority_filtering(self):
+        sensor = sum(
+            [
+                len(s.filter_data(d)) for s, d in self.__streams.items()
+                if isinstance(s, SensorStream)
+            ]
+        )
+        transaction = sum(
+            [
+                len(s.filter_data(d)) for s, d in self.__streams.items()
+                if isinstance(s, TransactionStream)
+            ]
+        )
+        return (
+            f"Filtered results: {sensor if sensor else None} critical sensor "
+            f"alerts, {transaction if transaction else None} large transaction"
+        )
 
 
 def main() -> None:
@@ -258,25 +292,34 @@ def main() -> None:
         SensorStream("SENSOR_001"): [
             {"temp": 30}, {"humidity": 74}, {"pressure": 1013}
         ],
-        TransactionStream("TRANS_001"): [{"buy": 100}, {"sell": 250}],
+        TransactionStream("TRANS_001"): [
+            {"buy": 100}, {"sell": 200}, {"buy": 75}, {"kill": 75}
+        ],
         EventStream("EVENT_001"): ["error", "404", "login"]
     }
 
-    for stream, data_batche in streams.items():
-        processor.add_stream(stream, data_batche)
+    for stream, data in streams.items():
+        processor.add_stream(stream, data)
 
-    print("Running Polymorphic Processing through StreamProcessor...")
-    results = processor.process_all_streams()
+    processor.process_all_streams()
 
-    for res in results:
-        print(f"[*] {res}")
+    print("=== Polymorphic Stream Processing ===")
+    print("Processing mixed stream types through unified interface...\n")
+    print("Batch 1 Results:")
 
-    print("\nFinal Statistics Summary:")
-    for stats in processor.get_all_stats():
+    for s, n in processor.get_all_processed_number().items():
         print(
-            f"Stream {stats['stream_id']} ({stats['stream_type']}): "
-            f"Processed: {stats['total_processed']}"
+            f"- {s.__class__.__name__[0:-6]} data: {n} "
+            f"{
+                "readings" if isinstance(s, SensorStream) else
+                "operations" if isinstance(s, TransactionStream) else "events"
+            }"
+            " processed"
         )
+
+    print("\nStream filtering active: High-priority data only")
+    print(processor.high_priority_filtering())
+    print("\nAll streams processed successfully. Nexus throughput optimal.")
 
 
 if __name__ == "__main__":
