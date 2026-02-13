@@ -1,5 +1,7 @@
+import io
 import time
 import random
+import contextlib
 import collections
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Protocol, Union, runtime_checkable
@@ -51,7 +53,9 @@ class InputStage:
             except KeyError as e:
                 raise KeyError(f"Unknown Unit: {e}")
 
-            data["weight"] = (float(data["weight"]) - rotten) / factors["kg"]
+            data["weight"] = round(
+                (float(data["weight"]) - rotten) / factors["kg"], 1
+            )
 
         result: Dict[str, Union[float, str]] = {}
         result["fruit"] = str(data["fruit"]).capitalize()
@@ -74,6 +78,8 @@ class TransformStage:
 
     def process(self, data: Dict[str, Any]) -> Dict[str, Union[str, float]]:
         """Implement transformation logic here."""
+        if "weight" not in data:
+            raise KeyError("Input error: weight missing in TransformStage")
 
         weight = float(data["weight"])
         if weight < 100:
@@ -83,13 +89,13 @@ class TransformStage:
 
         result = {
             "unit": "L",
-            "name": data['fruit'],
+            "name": data["name"],
             "row weight": weight,
-            "quantity": round(weight * random.uniform(0.75, 0.96), 2)
+            "quantity": round(weight * random.uniform(0.75, 0.96), 1)
         }
 
         print(
-            f"Transform: Transform fruit {data['fruit']} "
+            f"Transform: Transform fruit {result['name']} "
             f"to {result['name']} juice"
         )
 
@@ -104,6 +110,8 @@ class OutputStage:
 
     def process(self, data: Dict[str, Any]) -> Dict[str, Union[str, float]]:
         """Implement final output formatting here."""
+        if "quantity" not in data:
+            raise ValueError("Input error: quantity missing in OutputStage")
 
         extract = {
             "name": data["name"],
@@ -112,7 +120,8 @@ class OutputStage:
 
         print(
             f"Output: Extract {extract['name']} cans of juice "
-            f"from {data['row weight']} kg of {data['name']}"
+            f"from {data['row weight']} kg of "
+            f"{data["name"]}"
         )
 
         return extract
@@ -125,7 +134,7 @@ class ProcessingPipeline(ABC):
         self.stages: List[ProcessingStage] = []
 
     def add_stage(self, stage: ProcessingStage) -> None:
-        """Add a processing stage and return self for chaining."""
+        """Add a processing stage."""
         self.stages.append(stage)
 
     @abstractmethod
@@ -138,7 +147,6 @@ class JSONAdapter(ProcessingPipeline):
     """Adapter for JSON data format."""
 
     def __init__(self, pipeline_id: str) -> None:
-        """Initialize with pipeline ID."""
         super().__init__()
         self.pipeline_id = pipeline_id
 
@@ -212,24 +220,35 @@ class NexusManager:
     """Manager to orchestrate multiple pipelines."""
 
     def __init__(self) -> None:
-        """Initialize manager with stats and pipeline storage."""
         self.pipelines: List[ProcessingPipeline] = []
         self.stats: Dict[str, Any] = collections.defaultdict(int)
+
+        print("Initializing Nexus Manager...")
+        print("Pipeline capacity: 1000 streams/second\n")
 
     def add_pipeline(self, pipeline: ProcessingPipeline) -> None:
         """Add a pipeline to the manager."""
         self.pipelines.append(pipeline)
 
-    def process_data(self, data: Any) -> List[Any]:
-        """Process data through all pipelines."""
-        return [p.process(data) for p in self.pipelines]
-
     def chain_pipelines(self, data: Any) -> Dict[str, Any]:
-        """Implement pipeline chaining logic."""
+        """Implement dynamic pipeline chaining logic."""
         start_time = time.time()
         current = data
-        for p in self.pipelines:
-            current = p.process(current)
+
+        pipeline_names = [chr(65 + i) for i in range(len(self.pipelines))]
+        chain_visual = " -> ".join(
+            [f"Pipeline {name}" for name in pipeline_names]
+        )
+
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            for p in self.pipelines:
+                current = p.process(current)
+                if isinstance(current, str) and "Recovered" in current:
+                    break
+
+        print(f"{chain_visual}")
+
         return {
             "result": current,
             "elapsed": time.time() - start_time,
@@ -237,61 +256,43 @@ class NexusManager:
         }
 
 
-def main() -> None:
-    """Main function demonstrating the juice factory pipeline."""
-    print("=== CODE NEXUS - ENTERPRISE PIPELINE SYSTEM ===")
-    print("Initializing Nexus Manager...")
-    print("Pipeline capacity: 1000 fruits/batch")
-
-    print("\nCreating Juice Production Pipeline...")
-    print("Stage 1: Cleaning and sorting fruits")
-    print("Stage 2: Grinding and juicing the fruit")
-    print("Stage 3: Juice canning and storage")
+def enterprise_pipeline() -> None:
+    """Main function demonstrating dynamic chaining."""
+    print("=== CODE NEXUS - ENTERPRISE PIPELINE SYSTEM ===\n")
 
     manager = NexusManager()
 
-    json_pipe = JSONAdapter("JSON_FRUIT_PROC_01")
-    json_pipe.add_stage(InputStage())
-    json_pipe.add_stage(TransformStage())
-    json_pipe.add_stage(OutputStage())
+    pipes: Dict[ProcessingPipeline, List[ProcessingStage]] = {
+        CSVAdapter("INPUT_ADAPTER"): [InputStage()],
+        JSONAdapter("TRANSFORM_ADAPTER"): [TransformStage()],
+        JSONAdapter("OUTPUT_ADAPTER"): [OutputStage()]
+    }
 
-    csv_pipe = CSVAdapter("CSV_FRUIT_PROC_01")
-    csv_pipe.add_stage(InputStage())
-    csv_pipe.add_stage(TransformStage())
-    csv_pipe.add_stage(OutputStage())
+    print("Creating Data Processing Pipelines...")
+    for i, (pipe, stages) in enumerate(pipes.items(), 1):
+        try:
+            for j, stage in enumerate(stages, 1):
+                pipe.add_stage(stage)
+                print(f"Stage {j}: {stage.title}")
+            manager.add_pipeline(pipe)
+            print(f"Pipeline {i}: {pipe.__class__.__name__}\n")
+        except Exception as e:
+            raise Exception(
+                f"Error in pipeline ({pipe}) in addition stage ({stage}): {e}"
+            )
 
-    print("\n=== Multi-Format Juice Processing ===")
-
-    json_data = {"fruit": "Apple", "weight": 500, "unit": "kg"}
-    json_pipe.process(json_data)
-
-    print()
-
-    csv_data = "fruit,weight,unit\nOrange,800,kg"
-    csv_pipe.process(csv_data)
-
-    print("\n=== Pipeline Chaining Demo ===")
-    print("Pipeline A (Raw) -> Pipeline B (Juiced) -> Pipeline C (Canned)")
-
-    manager.add_pipeline(json_pipe)
-    manager.add_pipeline(csv_pipe)
+    print("=== Multi-Format Data Processing ===")
 
     chain_result = manager.chain_pipelines(
-        {"fruit": "Grapes", "weight": 1200, "unit": "kg"}
+        "fruit,weight,unit\nGrapes,1200,kg"
     )
 
-    print("Chain result: Batch processed through multi-stage system")
-    print(
-        f"Performance: {chain_result['efficiency']}% efficiency, "
-        f"{chain_result['elapsed']:.4f}s total processing time"
-    )
+    print("Chain status: Completed")
+    print(f"Final Data: {chain_result['result']}")
+    print(f"Performance: {chain_result['elapsed']:.4f}s total")
 
-    print("\n=== Error Recovery Test ===")
-    print("Simulating rotten fruit failure...")
-    json_pipe.process({"fruit": "Lemon", "weight": 10, "unit": "kg"})
-
-    print("\nNexus Integration complete. All factory systems operational.")
+    print("\nNexus Integration complete.")
 
 
 if __name__ == "__main__":
-    main()
+    enterprise_pipeline()
