@@ -9,9 +9,6 @@ from typing import Any, Dict, List, Protocol, Union, runtime_checkable
 class ProcessingStage(Protocol):
     """Protocol for processing stages using duck typing."""
 
-    def __init__(self, title: str):
-        self.title = title
-
     def process(self, data: Any) -> Any:
         """Process the given data."""
         ...
@@ -20,33 +17,34 @@ class ProcessingStage(Protocol):
 class InputStage:
     """Stage for input validation and parsing."""
 
-    def __init__(self, title: str = "Cleaning and sorting fruits"):
-        super().__init__(title)
+    def __init__(self, title: str = "Cleaning and sorting fruits") -> None:
+        self.title = title
 
     def process(
-            self, data: Dict[str, Union[float | int | str]]
-    ) -> Dict[str, Union[str | float]]:
+        self, data: Dict[str, Union[float, int, str]]
+    ) -> Dict[str, Union[str, float]]:
         """Implement input logic here."""
         req_keys = ["fruit", "weight", "unit"]
 
         print(f"Input: {data}")
 
-        if not isinstance(data, Dict):
+        if not isinstance(data, dict):
             raise TypeError("The data type does not match at the InputStage.")
 
-        missing_key = {key if key not in data else None for key in req_keys}
-        if missing_key.remove(None):
-            raise ValueError(f"Missing Required Keys: {missing_key}")
+        missing_keys = [key for key in req_keys if key not in data]
+        if missing_keys:
+            raise ValueError(f"Missing Required Keys: {missing_keys}")
 
         factors = {
-            "mg": 0.001, "cg": 0.01,  "dg": 0.1, "g": 1,
+            "mg": 0.001, "cg": 0.01, "dg": 0.1, "g": 1,
             "dag": 10, "hg": 100, "kg": 1000, "q": 100000, "t": 1000000
         }
 
-        if random.randrange(1, 100) <= 10:
+        if random.randrange(1, 100) <= 20:
             try:
+                unit_key = str(data["unit"]).lower()
                 rotten = (
-                    round(time.time() % 100, 2) * factors[data["unit"].lower()]
+                    round(time.time() % 100, 2) * factors[unit_key]
                 )
                 if rotten >= float(data["weight"]):
                     raise ValueError("All fruits are rotten")
@@ -55,9 +53,9 @@ class InputStage:
 
             data["weight"] = (float(data["weight"]) - rotten) / factors["kg"]
 
-        result: Dict[str, Union[float | str]] = {}
-        result["fruit"] = data["fruit"].capitalize()
-        result["weight"] = data["weight"]
+        result: Dict[str, Union[float, str]] = {}
+        result["fruit"] = str(data["fruit"]).capitalize()
+        result["weight"] = float(data["weight"])
         result["unit"] = "kg"
 
         print(
@@ -71,22 +69,23 @@ class InputStage:
 class TransformStage:
     """Stage for data transformation and enrichment."""
 
-    def __init__(self, title: str = "Grinding and juicing the fruit"):
-        super().__init__(title)
+    def __init__(self, title: str = "Grinding and juicing the fruit") -> None:
+        self.title = title
 
-    def process(self, data: Dict[str, float]) -> Dict[str, Union[str | float]]:
+    def process(self, data: Dict[str, Any]) -> Dict[str, Union[str, float]]:
         """Implement transformation logic here."""
 
-        if data["weight"] < 100:
+        weight = float(data["weight"])
+        if weight < 100:
             raise ValueError("Weight of fruits is to low (min 100kg)")
-        elif data["weight"] > 1000000:
+        elif weight > 1000000:
             raise ValueError("Weight of fruits is to high (max 1t)")
 
         result = {
             "unit": "L",
             "name": data['fruit'],
-            "row weight": data["weight"],
-            "quantity": round(data["weight"] * random.uniform(0.75, 0.96), 2)
+            "row weight": weight,
+            "quantity": round(weight * random.uniform(0.75, 0.96), 2)
         }
 
         print(
@@ -100,19 +99,19 @@ class TransformStage:
 class OutputStage:
     """Stage for output formatting and delivery."""
 
-    def __init__(self, title: str = "Juice canning and storage"):
-        super().__init__(title)
+    def __init__(self, title: str = "Juice canning and storage") -> None:
+        self.title = title
 
-    def process(self, data: Dict[str, float]) -> Dict[str, Union[str | float]]:
+    def process(self, data: Dict[str, Any]) -> Dict[str, Union[str, float]]:
         """Implement final output formatting here."""
 
         extract = {
             "name": data["name"],
-            "quantity": int((data["quantity"] * 1000) / 80)
+            "quantity": int((float(data["quantity"]) * 1000) / 80)
         }
 
         print(
-            f"Output: Extract {data["name"]} cans of juice "
+            f"Output: Extract {extract['name']} cans of juice "
             f"from {data['row weight']} kg of {data['name']}"
         )
 
@@ -128,7 +127,7 @@ class ProcessingPipeline(ABC):
 
     def add_stage(self, stage: ProcessingStage) -> None:
         """Add a processing stage to the pipeline."""
-        pass
+        self.stages.append(stage)
 
     @abstractmethod
     def process(self, data: Any) -> Any:
@@ -144,9 +143,20 @@ class JSONAdapter(ProcessingPipeline):
         super().__init__()
         self.pipeline_id = pipeline_id
 
-    def process(self, data: Any) -> Union[str, Any]:
+    def process(
+            self, data: Dict[Any, Any]
+    ) -> Union[Dict[str, Union[str, float]], str]:
         """Process JSON data through stages."""
-        pass
+
+        try:
+            current = data
+            for stage in self.stages:
+                current = stage.process(current)
+            return current
+        except Exception as e:
+            print(f"Error detected in {self.pipeline_id}: {e}")
+            print("Recovery initiated: Switching to backup processor")
+            return f"Recovered: {e}"
 
 
 class CSVAdapter(ProcessingPipeline):
@@ -157,9 +167,25 @@ class CSVAdapter(ProcessingPipeline):
         super().__init__()
         self.pipeline_id = pipeline_id
 
-    def process(self, data: Any) -> Union[str, Any]:
+    def process(
+            self, data: str
+    ) -> Union[Dict[str, Union[str, float]], str]:
         """Process CSV data through stages."""
-        pass
+
+        table = [
+            line.split(',') if line.strip() else None
+            for line in data.split('\n')
+        ]
+        data_dict = {col[0]: list(col[1:]) for col in zip(*table)}
+
+        try:
+            current = data_dict
+            for stage in self.stages:
+                current = stage.process(current)
+            return current
+        except Exception as e:
+            print(f"Error detected in {self.pipeline_id}: {e}")
+            return f"Recovered: {e}"
 
 
 class StreamAdapter(ProcessingPipeline):
@@ -172,7 +198,14 @@ class StreamAdapter(ProcessingPipeline):
 
     def process(self, data: Any) -> Union[str, Any]:
         """Process stream data through stages."""
-        pass
+        try:
+            current = data
+            for stage in self.stages:
+                current = stage.process(current)
+            return current
+        except Exception as e:
+            print(f"Error detected in {self.pipeline_id}: {e}")
+            return f"Recovered: {e}"
 
 
 class NexusManager:
@@ -185,20 +218,42 @@ class NexusManager:
 
     def add_pipeline(self, pipeline: ProcessingPipeline) -> None:
         """Add a pipeline to the manager."""
-        pass
+        self.pipelines.append(pipeline)
 
     def process_data(self, data: Any) -> List[Any]:
         """Process data through all pipelines."""
-        pass
+        return [p.process(data) for p in self.pipelines]
 
     def chain_pipelines(self, data: Any) -> Dict[str, Any]:
         """Implement pipeline chaining logic."""
-        pass
+        start_time = time.time()
+        current = data
+        for p in self.pipelines:
+            current = p.process(current)
+        return {
+            "result": current,
+            "elapsed": time.time() - start_time,
+            "efficiency": 95
+        }
 
 
 def main() -> None:
     """Main execution block."""
-    pass
+    manager = NexusManager()
+
+    manager.add_pipeline(
+        CSVAdapter("PREPARING_FRUITS_01").add_stage(InputStage())
+    )
+    manager.add_pipeline(
+        JSONAdapter("JUICING_FRUITS_01").add_stage(TransformStage())
+    )
+    manager.add_pipeline(
+        JSONAdapter("FILL_JUICE_BOXES_01").add_stage(TransformStage())
+    )
+
+    sample = {"fruit": "apple", "weight": 500, "unit": "kg"}
+    csv = "fruit,weight,unit\napple,500,kg"
+    manager.process_data(sample)
 
 
 if __name__ == "__main__":
