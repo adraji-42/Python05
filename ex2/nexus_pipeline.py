@@ -251,9 +251,8 @@ def main() -> None:
         JSONAdapter("FILL_JUICE_BOXES_01").add_stage(TransformStage())
     )
 
-    sample = {"fruit": "apple", "weight": 500, "unit": "kg"}
     csv = "fruit,weight,unit\napple,500,kg"
-    manager.process_data(sample)
+    manager.process_data(csv)
 
 
 if __name__ == "__main__":
