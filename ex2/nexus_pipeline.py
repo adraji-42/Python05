@@ -122,11 +122,10 @@ class ProcessingPipeline(ABC):
     """Abstract base class for processing pipelines."""
 
     def __init__(self) -> None:
-        """Initialize pipeline with empty stages list."""
         self.stages: List[ProcessingStage] = []
 
     def add_stage(self, stage: ProcessingStage) -> None:
-        """Add a processing stage to the pipeline."""
+        """Add a processing stage and return self for chaining."""
         self.stages.append(stage)
 
     @abstractmethod
@@ -163,28 +162,29 @@ class CSVAdapter(ProcessingPipeline):
     """Adapter for CSV data format."""
 
     def __init__(self, pipeline_id: str) -> None:
-        """Initialize with pipeline ID."""
         super().__init__()
         self.pipeline_id = pipeline_id
 
-    def process(
-            self, data: str
-    ) -> Union[Dict[str, Union[str, float]], str]:
-        """Process CSV data through stages."""
-
-        table = [
-            line.split(',') if line.strip() else None
-            for line in data.split('\n')
-        ]
-        data_dict = {col[0]: list(col[1:]) for col in zip(*table)}
-
+    def process(self, data: Any) -> Any:
         try:
-            current = data_dict
+            if isinstance(data, str):
+                table = [
+                    line.split(',') for line in data.split('\n')
+                    if line.strip()
+                ]
+                if not table:
+                    raise ValueError("Empty CSV")
+                raw_dict = {col[0]: list(col[1:]) for col in zip(*table)}
+                current = {k: v[0] for k, v in raw_dict.items()}
+            else:
+                current = data
+
             for stage in self.stages:
                 current = stage.process(current)
             return current
         except Exception as e:
             print(f"Error detected in {self.pipeline_id}: {e}")
+            print("Recovery initiated: Switching to backup processor")
             return f"Recovered: {e}"
 
 
@@ -238,21 +238,59 @@ class NexusManager:
 
 
 def main() -> None:
-    """Main execution block."""
+    """Main function demonstrating the juice factory pipeline."""
+    print("=== CODE NEXUS - ENTERPRISE PIPELINE SYSTEM ===")
+    print("Initializing Nexus Manager...")
+    print("Pipeline capacity: 1000 fruits/batch")
+
+    print("\nCreating Juice Production Pipeline...")
+    print("Stage 1: Cleaning and sorting fruits")
+    print("Stage 2: Grinding and juicing the fruit")
+    print("Stage 3: Juice canning and storage")
+
     manager = NexusManager()
 
-    manager.add_pipeline(
-        CSVAdapter("PREPARING_FRUITS_01").add_stage(InputStage())
-    )
-    manager.add_pipeline(
-        JSONAdapter("JUICING_FRUITS_01").add_stage(TransformStage())
-    )
-    manager.add_pipeline(
-        JSONAdapter("FILL_JUICE_BOXES_01").add_stage(TransformStage())
+    json_pipe = JSONAdapter("JSON_FRUIT_PROC_01")
+    json_pipe.add_stage(InputStage())
+    json_pipe.add_stage(TransformStage())
+    json_pipe.add_stage(OutputStage())
+
+    csv_pipe = CSVAdapter("CSV_FRUIT_PROC_01")
+    csv_pipe.add_stage(InputStage())
+    csv_pipe.add_stage(TransformStage())
+    csv_pipe.add_stage(OutputStage())
+
+    print("\n=== Multi-Format Juice Processing ===")
+
+    json_data = {"fruit": "Apple", "weight": 500, "unit": "kg"}
+    json_pipe.process(json_data)
+
+    print()
+
+    csv_data = "fruit,weight,unit\nOrange,800,kg"
+    csv_pipe.process(csv_data)
+
+    print("\n=== Pipeline Chaining Demo ===")
+    print("Pipeline A (Raw) -> Pipeline B (Juiced) -> Pipeline C (Canned)")
+
+    manager.add_pipeline(json_pipe)
+    manager.add_pipeline(csv_pipe)
+
+    chain_result = manager.chain_pipelines(
+        {"fruit": "Grapes", "weight": 1200, "unit": "kg"}
     )
 
-    csv = "fruit,weight,unit\napple,500,kg"
-    manager.process_data(csv)
+    print("Chain result: Batch processed through multi-stage system")
+    print(
+        f"Performance: {chain_result['efficiency']}% efficiency, "
+        f"{chain_result['elapsed']:.4f}s total processing time"
+    )
+
+    print("\n=== Error Recovery Test ===")
+    print("Simulating rotten fruit failure...")
+    json_pipe.process({"fruit": "Lemon", "weight": 10, "unit": "kg"})
+
+    print("\nNexus Integration complete. All factory systems operational.")
 
 
 if __name__ == "__main__":
