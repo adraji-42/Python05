@@ -1,15 +1,43 @@
-import io
 import time
 import random
-import contextlib
 import collections
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Protocol, Union, runtime_checkable
 
 
+class Base26Converter:
+
+    def __init__(self) -> None:
+        self.alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        self.base = len(self.alphabet)
+
+    def encode(self, number: int) -> str:
+
+        if number == 0:
+            return self.alphabet[0]
+
+        result = []
+        temp_num = number
+        while temp_num > 0:
+            result.append(self.alphabet[temp_num % self.base])
+            temp_num //= self.base
+
+        return "".join(reversed(result))
+
+    def decode(self, b26_string: str) -> int:
+
+        number = 0
+        for char in b26_string:
+            number = number * self.base + self.alphabet.index(char)
+        return number
+
+
 @runtime_checkable
 class ProcessingStage(Protocol):
     """Protocol for processing stages using duck typing."""
+
+    def __init__(self, title: str) -> None:
+        self.title = title
 
     def process(self, data: Any) -> Any:
         """Process the given data."""
@@ -35,37 +63,41 @@ class InputStage:
 
         missing_keys = [key for key in req_keys if key not in data]
         if missing_keys:
-            raise ValueError(f"Missing Required Keys: {missing_keys}")
+            raise KeyError(f"Missing Required Keys: {missing_keys}")
 
         factors = {
             "mg": 0.001, "cg": 0.01, "dg": 0.1, "g": 1,
             "dag": 10, "hg": 100, "kg": 1000, "q": 100000, "t": 1000000
         }
+        unit_key = str(data["unit"]).lower()
 
-        if random.randrange(1, 100) <= 20:
-            try:
-                unit_key = str(data["unit"]).lower()
-                rotten = (
-                    round(time.time() % 100, 2) * factors[unit_key]
-                )
-                if rotten >= float(data["weight"]):
-                    raise ValueError("All fruits are rotten")
-            except KeyError as e:
-                raise KeyError(f"Unknown Unit: {e}")
+        try:
+            data["weight"] = float(data["weight"]) * factors[unit_key]
+        except KeyError as e:
+            raise ValueError(f"Unknown Unit: {e}")
+
+        if random.randrange(1, 100) <= 30:
+            rotten = (
+                round(time.time() % 100, 1) * factors[unit_key]
+            )
+            if rotten >= data["weight"]:
+                raise ValueError("All fruits are rotten")
 
             data["weight"] = round(
-                (float(data["weight"]) - rotten) / factors["kg"], 1
+                data["weight"] - rotten, 1
+            )
+
+            print(
+                "The damaged fruit was discarded, "
+                f"the remaining quantity is {data["weight"] / 1000}kg"
             )
 
         result: Dict[str, Union[float, str]] = {}
         result["fruit"] = str(data["fruit"]).capitalize()
-        result["weight"] = float(data["weight"])
+        result["weight"] = data["weight"] / 1000
         result["unit"] = "kg"
 
-        print(
-            "The damaged fruit was discarded, "
-            f"the remaining quantity is {result['weight']}"
-        )
+        print(f"After {self.title}: {result}")
 
         return result
 
@@ -89,14 +121,18 @@ class TransformStage:
 
         result = {
             "unit": "L",
-            "name": data["name"],
+            "fruit": data["fruit"],
             "row weight": weight,
             "quantity": round(weight * random.uniform(0.75, 0.96), 1)
         }
 
         print(
-            f"Transform: Transform fruit {result['name']} "
-            f"to {result['name']} juice"
+            f"Transform: Transform fruit {result['fruit']} "
+            f"to {result['fruit']} juice"
+        )
+        print(
+            f"Result of transform: {result['fruit']} juice "
+            f"({result['quantity']}L)"
         )
 
         return result
@@ -114,14 +150,14 @@ class OutputStage:
             raise ValueError("Input error: quantity missing in OutputStage")
 
         extract = {
-            "name": data["name"],
+            "fruit": data["fruit"],
             "quantity": int((float(data["quantity"]) * 1000) / 80)
         }
 
         print(
-            f"Output: Extract {extract['name']} cans of juice "
-            f"from {data['row weight']} kg of "
-            f"{data["name"]}"
+            f"Output: Extract {extract['quantity']} bottles of "
+            f"{extract['fruit']} juice from {data['row weight']} kg of "
+            f"{data["fruit"]}"
         )
 
         return extract
@@ -150,20 +186,18 @@ class JSONAdapter(ProcessingPipeline):
         super().__init__()
         self.pipeline_id = pipeline_id
 
-    def process(
-            self, data: Dict[Any, Any]
-    ) -> Union[Dict[str, Union[str, float]], str]:
+    def process(self, data: Dict[Any, Any]) -> Dict[str, Union[str, float]]:
         """Process JSON data through stages."""
 
-        try:
-            current = data
-            for stage in self.stages:
+        current = data
+        for stage in self.stages:
+            try:
                 current = stage.process(current)
-            return current
-        except Exception as e:
-            print(f"Error detected in {self.pipeline_id}: {e}")
-            print("Recovery initiated: Switching to backup processor")
-            return f"Recovered: {e}"
+            except Exception as e:
+                raise Exception(
+                    f"Error detected in {stage.title}: {e}"
+                )
+        return current
 
 
 class CSVAdapter(ProcessingPipeline):
@@ -173,27 +207,28 @@ class CSVAdapter(ProcessingPipeline):
         super().__init__()
         self.pipeline_id = pipeline_id
 
-    def process(self, data: Any) -> Any:
-        try:
-            if isinstance(data, str):
-                table = [
-                    line.split(',') for line in data.split('\n')
-                    if line.strip()
-                ]
-                if not table:
-                    raise ValueError("Empty CSV")
-                raw_dict = {col[0]: list(col[1:]) for col in zip(*table)}
-                current = {k: v[0] for k, v in raw_dict.items()}
-            else:
-                current = data
+    def process(self, data: str) -> Dict[str, Union[str, float]]:
 
-            for stage in self.stages:
+        if isinstance(data, str):
+            table = [
+                line.split(',') for line in data.split('\n')
+                if line.strip()
+            ]
+            if not table:
+                raise ValueError("Empty CSV")
+            raw_dict = {col[0]: list(col[1:]) for col in zip(*table)}
+            current = {k: v[0] for k, v in raw_dict.items()}
+        else:
+            current = data
+
+        for stage in self.stages:
+            try:
                 current = stage.process(current)
-            return current
-        except Exception as e:
-            print(f"Error detected in {self.pipeline_id}: {e}")
-            print("Recovery initiated: Switching to backup processor")
-            return f"Recovered: {e}"
+            except Exception as e:
+                raise Exception(
+                    f"Error detected in {stage.title}: {e}"
+                )
+        return current
 
 
 class StreamAdapter(ProcessingPipeline):
@@ -204,16 +239,18 @@ class StreamAdapter(ProcessingPipeline):
         super().__init__()
         self.pipeline_id = pipeline_id
 
-    def process(self, data: Any) -> Union[str, Any]:
+    def process(self, data: Any) -> Dict[str, Union[str, float]]:
         """Process stream data through stages."""
-        try:
-            current = data
-            for stage in self.stages:
+
+        current = data
+        for stage in self.stages:
+            try:
                 current = stage.process(current)
-            return current
-        except Exception as e:
-            print(f"Error detected in {self.pipeline_id}: {e}")
-            return f"Recovered: {e}"
+            except Exception as e:
+                raise Exception(
+                    f"Error detected in {stage.title}: {e}"
+                )
+        return current
 
 
 class NexusManager:
@@ -224,36 +261,71 @@ class NexusManager:
         self.stats: Dict[str, Any] = collections.defaultdict(int)
 
         print("Initializing Nexus Manager...")
-        print("Pipeline capacity: 1000 streams/second\n")
+        print("Pipeline capacity: 50000 bottle/second\n")
 
     def add_pipeline(self, pipeline: ProcessingPipeline) -> None:
         """Add a pipeline to the manager."""
         self.pipelines.append(pipeline)
 
-    def chain_pipelines(self, data: Any) -> Dict[str, Any]:
+    def chain_pipelines(self, data: Any) -> None:
         """Implement dynamic pipeline chaining logic."""
-        start_time = time.time()
-        current = data
 
-        pipeline_names = [chr(65 + i) for i in range(len(self.pipelines))]
-        chain_visual = " -> ".join(
-            [f"Pipeline {name}" for name in pipeline_names]
+        error = False
+        current = data
+        chain: List[str] = []
+        start_time = time.time()
+        converter = Base26Converter()
+
+        for i, pipe in enumerate(self.pipelines):
+            try:
+                print(
+                    f"Processing "
+                    f"{pipe.__class__.__name__.removesuffix("Adapter")} data "
+                    "through pipeline..."
+                )
+                current = pipe.process(current)
+                chain.append(converter.encode(i))
+                print()
+            except Exception as e:
+                error = True
+                print(f"Error in pipeline ({pipe.__class__.__name__}): {e}\n")
+                break
+
+        time.sleep(round(random.uniform(0.2, 0.3), 2))
+        run_time = round(time.time() - start_time, 2)
+
+        result = {
+            "result": current,
+            "time": run_time,
+            "chain": " -> ".join(
+                [
+                    "Pipeline" + pipe_id if not error else "Stop"
+                    for pipe_id in chain
+                ]
+            ),
+            "efficiency": (
+                round((current['quantity'] / run_time) / 500, 2)
+                if run_time else 100
+            )
+        }
+
+        chain_len = len(chain) if not error else len(chain.remove("Stop"))
+        chain_efficiency = (
+            round(chain_len / len(self.pipelines) * 100, 1) if error else 100
         )
 
-        f = io.StringIO()
-        with contextlib.redirect_stdout(f):
-            for p in self.pipelines:
-                current = p.process(current)
-                if isinstance(current, str) and "Recovered" in current:
-                    break
+        print("=== Pipelines Chaining Demo ===")
+        print(result['chain'])
+        print(f"Chain result: {chain_efficiency}%")
 
-        print(f"{chain_visual}")
+        if error:
+            return
 
-        return {
-            "result": current,
-            "elapsed": time.time() - start_time,
-            "efficiency": 95
-        }
+        print(
+            "Performance: "
+            f"{result['efficiency']}% efficiency, {result['time']:.1f}s total "
+            "processing time\n"
+        )
 
 
 def enterprise_pipeline() -> None:
@@ -271,28 +343,39 @@ def enterprise_pipeline() -> None:
     print("Creating Data Processing Pipelines...")
     for i, (pipe, stages) in enumerate(pipes.items(), 1):
         try:
+            print(f"+ Pipeline {i}: {pipe.__class__.__name__}")
             for j, stage in enumerate(stages, 1):
                 pipe.add_stage(stage)
-                print(f"Stage {j}: {stage.title}")
+                print(f"    - Stage {j}: {stage.title}")
             manager.add_pipeline(pipe)
-            print(f"Pipeline {i}: {pipe.__class__.__name__}\n")
+            print()
         except Exception as e:
             raise Exception(
-                f"Error in pipeline ({pipe}) in addition stage ({stage}): {e}"
+                f"Error in pipeline ({pipe}) in addition stage "
+                f"({stage}): {e}\n"
             )
 
-    print("=== Multi-Format Data Processing ===")
+    try:
+        print("=== Multi-Format Data Processing ===\n")
+        manager.chain_pipelines("fruit,weight,unit\nGrapes,1200,kg")
+    except Exception as e:
+        print(f"Unexpected Error: {e}\n")
 
-    chain_result = manager.chain_pipelines(
-        "fruit,weight,unit\nGrapes,1200,kg"
-    )
+    try:
+        print("=== Error Recovery Test ===")
+        manager.chain_pipelines("fruit,weight,99\nGrapes,1200,kg")
+    except Exception as e:
+        print(f"Unexpected Error: {e}\n")
 
-    print("Chain status: Completed")
-    print(f"Final Data: {chain_result['result']}")
-    print(f"Performance: {chain_result['elapsed']:.4f}s total")
+    print("\nNexus Integration complete. All systems operational.")
 
-    print("\nNexus Integration complete.")
+
+def main() -> None:
+    try:
+        enterprise_pipeline()
+    except Exception as e:
+        print(e, end="\n\n")
 
 
 if __name__ == "__main__":
-    enterprise_pipeline()
+    main()
