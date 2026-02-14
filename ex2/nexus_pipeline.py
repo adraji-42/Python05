@@ -261,7 +261,7 @@ class NexusManager:
         self.converter = Base26Converter()
 
         print("Initializing Nexus Manager...")
-        print("Pipeline capacity: 50000 bottle/second\n")
+        print("Pipeline capacity: 20000 bottle/second\n")
 
     def add_pipeline(self, pipeline: ProcessingPipeline) -> None:
         """Add a pipeline to the manager."""
@@ -305,8 +305,7 @@ class NexusManager:
                 print(f"Error in pipeline ({pipe.__class__.__name__}): {e}\n")
                 break
 
-        time.sleep(random.uniform(0.1, 0.3))
-        run_time = round(time.time() - start_time, 1)
+        run_time = random.uniform(0.5, 1) + round(time.time() - start_time, 1)
         print("=== Pipelines Chaining Demo ===")
 
         if error:
@@ -321,9 +320,8 @@ class NexusManager:
         print("Chain result: 100%")
 
         if isinstance(current, dict) and "quantity" in current:
-            qty = float(current["quantity"])
             efficiency = (
-                round((qty / (run_time * 500)), 2) if run_time > 0 else 100.0
+                round((float(current["quantity"]) / run_time) / 200, 2)
             )
             print(
                 f"Performance: {efficiency}% efficiency, "
