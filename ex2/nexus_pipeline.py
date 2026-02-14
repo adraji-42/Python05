@@ -1,6 +1,6 @@
+import sys
 import time
 import random
-import collections
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Protocol, Union, runtime_checkable
 
@@ -258,7 +258,7 @@ class NexusManager:
 
     def __init__(self) -> None:
         self.pipelines: List[ProcessingPipeline] = []
-        self.stats: Dict[str, Any] = collections.defaultdict(int)
+        self.converter = Base26Converter()
 
         print("Initializing Nexus Manager...")
         print("Pipeline capacity: 50000 bottle/second\n")
@@ -267,65 +267,68 @@ class NexusManager:
         """Add a pipeline to the manager."""
         self.pipelines.append(pipeline)
 
-    def chain_pipelines(self, data: Any) -> None:
-        """Implement dynamic pipeline chaining logic."""
+    def __find_my_name(self) -> str:
+        """Search the caller's local scope for this instance's name."""
+        try:
+            frame = sys._getframe(2)
+            for name, val in frame.f_locals.items():
+                if val is self:
+                    return name
+        except (ValueError, AttributeError):
+            pass
+        return "Unknown"
 
+    def chain_pipelines(self, data: Any) -> None:
+        """Implement dynamic pipeline chaining logic using Base26 indexing."""
         error = False
         current = data
         chain: List[str] = []
         start_time = time.time()
-        converter = Base26Converter()
+
+        if not self.pipelines:
+            raise ValueError(
+                f"No Pipelines in NexusManager object {self.__find_my_name()}"
+            )
 
         for i, pipe in enumerate(self.pipelines):
+            p_id = f"Pipeline {self.converter.encode(i)}"
             try:
-                print(
-                    f"Processing "
-                    f"{pipe.__class__.__name__.removesuffix("Adapter")} data "
-                    "through pipeline..."
-                )
+                adapter_type = pipe.__class__.__name__.removesuffix("Adapter")
+                print(f"Processing {adapter_type} data through pipeline...")
+
                 current = pipe.process(current)
-                chain.append(converter.encode(i))
+                chain.append(p_id)
                 print()
             except Exception as e:
+                chain.append(f"{p_id} (STOP)")
                 error = True
                 print(f"Error in pipeline ({pipe.__class__.__name__}): {e}\n")
                 break
 
-        time.sleep(round(random.uniform(0.2, 0.3), 2))
-        run_time = round(time.time() - start_time, 2)
-
-        result = {
-            "result": current,
-            "time": run_time,
-            "chain": " -> ".join(
-                [
-                    "Pipeline" + pipe_id if not error else "Stop"
-                    for pipe_id in chain
-                ]
-            ),
-            "efficiency": (
-                round((current['quantity'] / run_time) / 500, 2)
-                if run_time else 100
-            )
-        }
-
-        chain_len = len(chain) if not error else len(chain.remove("Stop"))
-        chain_efficiency = (
-            round(chain_len / len(self.pipelines) * 100, 1) if error else 100
-        )
-
+        time.sleep(random.uniform(0.1, 0.3))
+        run_time = round(time.time() - start_time, 1)
         print("=== Pipelines Chaining Demo ===")
-        print(result['chain'])
-        print(f"Chain result: {chain_efficiency}%")
 
         if error:
+            print(f"{' -> '.join(chain)}")
+            completion = round(
+                ((len(chain) - 1) / len(self.pipelines)) * 100, 1
+            )
+            print(f"Chain result: {completion}%")
             return
 
-        print(
-            "Performance: "
-            f"{result['efficiency']}% efficiency, {result['time']:.1f}s total "
-            "processing time\n"
-        )
+        print(" -> ".join(chain))
+        print("Chain result: 100%")
+
+        if isinstance(current, dict) and "quantity" in current:
+            qty = float(current["quantity"])
+            efficiency = (
+                round((qty / (run_time * 500)), 2) if run_time > 0 else 100.0
+            )
+            print(
+                f"Performance: {efficiency}% efficiency, "
+                f"{run_time}s total processing time\n"
+            )
 
 
 def enterprise_pipeline() -> None:
@@ -362,7 +365,7 @@ def enterprise_pipeline() -> None:
         print(f"Unexpected Error: {e}\n")
 
     try:
-        print("=== Error Recovery Test ===")
+        print("=== Error Recovery Test ===\n")
         manager.chain_pipelines("fruit,weight,99\nGrapes,1200,kg")
     except Exception as e:
         print(f"Unexpected Error: {e}\n")
