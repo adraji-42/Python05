@@ -6,13 +6,21 @@ from typing import Any, Dict, List, Protocol, Union, runtime_checkable
 
 
 class Base26Converter:
+    """A converter for base-10 to base-26 (alphabetical) and vice versa."""
 
     def __init__(self) -> None:
         self.alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         self.base = len(self.alphabet)
 
     def encode(self, number: int) -> str:
+        """Encode an integer to a base-26 string.
 
+        Args:
+            number: The integer to encode.
+
+        Returns:
+            The base-26 string representation.
+        """
         if number == 0:
             return self.alphabet[0]
 
@@ -25,7 +33,14 @@ class Base26Converter:
         return "".join(reversed(result))
 
     def decode(self, b26_string: str) -> int:
+        """Decode a base-26 string to an integer.
 
+        Args:
+            b26_string: The string to decode.
+
+        Returns:
+            The integer value.
+        """
         number = 0
         for char in b26_string:
             number = number * self.base + self.alphabet.index(char)
@@ -36,11 +51,17 @@ class Base26Converter:
 class ProcessingStage(Protocol):
     """Protocol for processing stages using duck typing."""
 
-    def __init__(self, title: str) -> None:
-        self.title = title
+    title: str
 
     def process(self, data: Any) -> Any:
-        """Process the given data."""
+        """Process the given data.
+
+        Args:
+            data: The input data to process.
+
+        Returns:
+            The processed data.
+        """
         ...
 
 
@@ -53,17 +74,29 @@ class InputStage:
     def process(
         self, data: Dict[str, Union[float, int, str]]
     ) -> Dict[str, Union[str, float]]:
-        """Implement input logic here."""
+        """Process input fruit data.
+
+        Args:
+            data: Raw fruit data dictionary.
+
+        Returns:
+            Cleaned data in kilograms.
+
+        Raises:
+            TypeError: If data is not a dictionary.
+            KeyError: If required keys are missing.
+            ValueError: If unit is unknown or fruits are rotten.
+        """
         req_keys = ["fruit", "weight", "unit"]
 
         print(f"Input: {data}")
 
         if not isinstance(data, dict):
-            raise TypeError("The data type does not match at the InputStage.")
+            raise TypeError("Data must be a dictionary.")
 
         missing_keys = [key for key in req_keys if key not in data]
         if missing_keys:
-            raise KeyError(f"Missing Required Keys: {missing_keys}")
+            raise KeyError(f"Missing keys: {missing_keys}")
 
         factors = {
             "mg": 0.001, "cg": 0.01, "dg": 0.1, "g": 1,
@@ -71,16 +104,14 @@ class InputStage:
         }
         unit_key = str(data["unit"]).lower()
 
-        try:
-            data["weight"] = float(data["weight"]) * factors[unit_key]
-        except KeyError as e:
-            raise ValueError(f"Unknown Unit: {e}")
+        if unit_key not in factors:
+            raise ValueError(f"Unknown unit: {unit_key}")
+
+        weight_in_grams = float(data["weight"]) * factors[unit_key]
 
         if random.randrange(1, 100) <= 30:
-            rotten = (
-                round(time.time() % 100, 1) * factors[unit_key]
-            )
-            if rotten >= data["weight"]:
+            rotten = round(time.time() % 100, 1) * factors[unit_key]
+            if rotten >= weight_in_grams:
                 raise ValueError("All fruits are rotten")
 
             data["weight"] = round(
@@ -92,10 +123,11 @@ class InputStage:
                 f"the remaining quantity is {data["weight"] / 1000}kg"
             )
 
-        result: Dict[str, Union[float, str]] = {}
-        result["fruit"] = str(data["fruit"]).capitalize()
-        result["weight"] = data["weight"] / 1000
-        result["unit"] = "kg"
+        result: Dict[str, Union[float, str]] = {
+            "fruit": str(data["fruit"]).capitalize(),
+            "weight": weight_in_grams / 1000,
+            "unit": "kg"
+        }
 
         print(f"After {self.title}: {result}")
 
