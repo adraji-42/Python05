@@ -1,14 +1,25 @@
-import sys
 import time
 import random
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Protocol, Union, runtime_checkable
 
 
+GRAM_TO_KG = 1000
+L_TO_ML = 1000
+BOTTLE_VOLUME_ML = 80
+MIN_JUICE_YIELD = 0.75
+MAX_JUICE_YIELD = 0.96
+MIN_WEIGHT_KG = 1000
+MAX_WEIGHT_KG = 10000
+ROTTEN_CHANCE = 30
+PIPELINE_CAPACITY = 20000
+
+
 class Base26Converter:
     """A converter for base-10 to base-26 (alphabetical) and vice versa.
 
-    Used for generating spreadsheet-like column identifiers (A, B, C... Z, AA).
+    Used for generating spreadsheet-like column identifiers (A, B, C... Z,
+    AA).
     """
 
     def __init__(self) -> None:
@@ -27,13 +38,11 @@ class Base26Converter:
         """
         if number == 0:
             return self.alphabet[0]
-
         result = []
         temp_num = number
         while temp_num > 0:
             result.append(self.alphabet[temp_num % self.base])
             temp_num //= self.base
-
         return "".join(reversed(result))
 
     def decode(self, b26_string: str) -> int:
@@ -55,11 +64,8 @@ class Base26Converter:
 class ProcessingStage(Protocol):
     """Protocol for processing stages using duck typing.
 
-    Ensures that any stage implementation
-    provides a title and a process method.
+    Any class that provides a process() method qualifies as a stage.
     """
-
-    title: str
 
     def process(self, data: Any) -> Any:
         """Process the given data.
@@ -87,15 +93,13 @@ class InputStage:
         """
         self.title = title
 
-    def process(
-        self, data: Dict[str, Union[float, int, str]]
-    ) -> Dict[str, Union[str, float]]:
-        """Process input fruit data and handles weight
-        reduction for rotten items.
+    def process(self, data: Any) -> Dict[str, Union[str, float]]:
+        """Process input fruit data and handle weight reduction for rotten
+        items.
 
         Args:
-            data: Raw fruit data dictionary containing
-            'fruit', 'weight', and 'unit'.
+            data: Raw fruit data dictionary containing 'fruit', 'weight',
+                  and 'unit'.
 
         Returns:
             Dict[str, Union[str, float]]: Cleaned data standardized to kg.
@@ -103,52 +107,52 @@ class InputStage:
         Raises:
             TypeError: If data is not a dictionary.
             KeyError: If required keys are missing.
-            ValueError: If unit is unknown or all fruits are rotten.
+            ValueError: If unit is unknown, weight is invalid, or all
+                        fruits are rotten.
         """
         req_keys = ["fruit", "weight", "unit"]
-
-        print(f"Input: {data}")
+        print(f"Input:{'-'*10}\n{data}\n{'-'*16}")
 
         if not isinstance(data, dict):
             raise TypeError("Data must be a dictionary.")
 
-        missing_keys = [key for key in req_keys if key not in data]
-        if missing_keys:
-            raise KeyError(f"Missing keys: {missing_keys}")
+        missing = [k for k in req_keys if k not in data]
+        if missing:
+            raise KeyError(f"Missing keys: {missing}")
 
-        factors = {
+        factors: Dict[str, float] = {
             "mg": 0.001, "cg": 0.01, "dg": 0.1, "g": 1,
-            "dag": 10, "hg": 100, "kg": 1000, "q": 100000, "t": 1000000
+            "dag": 10, "hg": 100, "kg": GRAM_TO_KG,
+            "q": 100000, "t": 1000000
         }
         unit_key = str(data["unit"]).lower()
-
         if unit_key not in factors:
             raise ValueError(f"Unknown unit: {unit_key}")
 
-        weight_in_grams = float(data["weight"]) * factors[unit_key]
+        try:
+            weight_val = float(data["weight"])
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid weight value: {data['weight']}")
 
-        if random.randrange(1, 100) <= 30:
-            rotten = round(time.time() % 100, 1) * factors[unit_key]
-            if rotten >= weight_in_grams:
+        weight_in_grams = weight_val * factors[unit_key]
+
+        if random.randrange(1, 100) <= ROTTEN_CHANCE:
+            rotten_g = round(time.time() % 100, 1) * factors[unit_key]
+            if rotten_g >= weight_in_grams:
                 raise ValueError("All fruits are rotten")
-
-            data["weight"] = round(
-                data["weight"] - rotten, 1
-            )
-
+            weight_in_grams -= rotten_g
             print(
                 "The damaged fruit was discarded, "
-                f"the remaining quantity is {data['weight'] / 1000}kg"
+                f"the remaining quantity is "
+                f"{round(weight_in_grams / GRAM_TO_KG, 1)}kg"
             )
 
         result: Dict[str, Union[float, str]] = {
             "fruit": str(data["fruit"]).capitalize(),
-            "weight": weight_in_grams / 1000,
+            "weight": weight_in_grams / GRAM_TO_KG,
             "unit": "kg"
         }
-
         print(f"After {self.title}: {result}")
-
         return result
 
 
@@ -158,7 +162,9 @@ class TransformStage:
     Simulates the grinding and juicing process with random yield efficiency.
     """
 
-    def __init__(self, title: str = "Grinding and juicing the fruit") -> None:
+    def __init__(
+        self, title: str = "Grinding and juicing the fruit"
+    ) -> None:
         """Initializes the transformation stage.
 
         Args:
@@ -166,11 +172,11 @@ class TransformStage:
         """
         self.title = title
 
-    def process(self, data: Dict[str, Any]) -> Dict[str, Union[str, float]]:
+    def process(self, data: Any) -> Dict[str, Union[str, float]]:
         """Transforms fruit weight into juice volume (Liters).
 
         Args:
-            data: Dictionary containing fruit type and weight.
+            data: Dictionary containing fruit type and weight in kg.
 
         Returns:
             Dict[str, Union[str, float]]: Results of the juicing process.
@@ -179,22 +185,28 @@ class TransformStage:
             KeyError: If weight is missing.
             ValueError: If weight is outside allowed factory bounds.
         """
-        if "weight" not in data:
+        if not isinstance(data, dict) or "weight" not in data:
             raise KeyError("Input error: weight missing in TransformStage")
 
         weight = float(data["weight"])
-        if weight < 100:
-            raise ValueError("Weight of fruits is to low (min 100kg)")
-        elif weight > 1000000:
-            raise ValueError("Weight of fruits is to high (max 1t)")
+        if weight < MIN_WEIGHT_KG:
+            raise ValueError(
+                f"Weight of fruits is too low (min {MIN_WEIGHT_KG}kg)"
+            )
+        if weight > MAX_WEIGHT_KG:
+            raise ValueError(
+                "Weight of fruits is too high "
+                f"(max {MIN_WEIGHT_KG}kg)")
 
-        result = {
+        result: Dict[str, Union[str, float]] = {
             "unit": "L",
             "fruit": data["fruit"],
             "row weight": weight,
-            "quantity": round(weight * random.uniform(0.75, 0.96), 1)
+            "quantity": round(
+                weight * random.uniform(MIN_JUICE_YIELD, MAX_JUICE_YIELD),
+                1
+            )
         }
-
         print(
             f"Transform: Transform fruit {result['fruit']} "
             f"to {result['fruit']} juice"
@@ -203,7 +215,6 @@ class TransformStage:
             f"Result of transform: {result['fruit']} juice "
             f"({result['quantity']}L)"
         )
-
         return result
 
 
@@ -221,7 +232,7 @@ class OutputStage:
         """
         self.title = title
 
-    def process(self, data: Dict[str, Any]) -> Dict[str, Union[str, float]]:
+    def process(self, data: Any) -> Dict[str, Union[str, float]]:
         """Calculates the number of bottles extracted from juice volume.
 
         Args:
@@ -233,20 +244,22 @@ class OutputStage:
         Raises:
             ValueError: If quantity is missing from the data.
         """
-        if "quantity" not in data:
-            raise ValueError("Input error: quantity missing in OutputStage")
+        if not isinstance(data, dict) or "quantity" not in data:
+            raise ValueError(
+                "Input error: quantity missing in OutputStage"
+            )
 
-        extract = {
+        extract: Dict[str, Union[str, float]] = {
             "fruit": data["fruit"],
-            "quantity": int((float(data["quantity"]) * 1000) / 80)
+            "quantity": int(
+                (float(data["quantity"]) * L_TO_ML) / BOTTLE_VOLUME_ML
+            )
         }
-
         print(
             f"Output: Extract {extract['quantity']} bottles of "
             f"{extract['fruit']} juice from {data['row weight']} kg of "
             f"{data['fruit']}"
         )
-
         return extract
 
 
@@ -270,7 +283,7 @@ class ProcessingPipeline(ABC):
 
     @abstractmethod
     def process(self, data: Any) -> Any:
-        """Abstract method to define the data flow through the pipeline.
+        """Abstract method to define data flow through the pipeline.
 
         Args:
             data: Input data to be processed.
@@ -290,14 +303,14 @@ class JSONAdapter(ProcessingPipeline):
         super().__init__()
         self.pipeline_id = pipeline_id
 
-    def process(self, data: Dict[Any, Any]) -> Dict[str, Union[str, float]]:
+    def process(self, data: Any) -> Any:
         """Sequentially executes stages on JSON data.
 
         Args:
             data: Dictionary data input.
 
         Returns:
-            Dict[str, Union[str, float]]: Final processed result.
+            Any: Final processed result.
 
         Raises:
             Exception: If any stage execution fails.
@@ -306,7 +319,7 @@ class JSONAdapter(ProcessingPipeline):
         for stage in self.stages:
             try:
                 current = stage.process(current)
-            except Exception as e:
+            except (TypeError, KeyError, ValueError) as e:
                 raise Exception(
                     f"Error detected in {stage.title}: {e}"
                 )
@@ -325,14 +338,17 @@ class CSVAdapter(ProcessingPipeline):
         super().__init__()
         self.pipeline_id = pipeline_id
 
-    def process(self, data: str) -> Dict[str, Union[str, float]]:
+    def process(self, data: Any) -> Any:
         """Parses CSV string and passes it through processing stages.
 
+        Accepts either a CSV-formatted string or a pre-parsed dictionary,
+        maintaining interface compatibility with the base class signature.
+
         Args:
-            data: CSV formatted string.
+            data: CSV formatted string or dictionary.
 
         Returns:
-            Dict[str, Union[str, float]]: Processed data dictionary.
+            Any: Processed data dictionary.
 
         Raises:
             ValueError: If CSV data is empty.
@@ -346,14 +362,14 @@ class CSVAdapter(ProcessingPipeline):
             if not table:
                 raise ValueError("Empty CSV")
             raw_dict = {col[0]: list(col[1:]) for col in zip(*table)}
-            current = {k: v[0] for k, v in raw_dict.items()}
+            current: Any = {k: v[0] for k, v in raw_dict.items()}
         else:
             current = data
 
         for stage in self.stages:
             try:
                 current = stage.process(current)
-            except Exception as e:
+            except (TypeError, KeyError, ValueError) as e:
                 raise Exception(
                     f"Error detected in {stage.title}: {e}"
                 )
@@ -372,14 +388,14 @@ class StreamAdapter(ProcessingPipeline):
         super().__init__()
         self.pipeline_id = pipeline_id
 
-    def process(self, data: Any) -> Dict[str, Union[str, float]]:
+    def process(self, data: Any) -> Any:
         """Passes streaming data packets through pipeline stages.
 
         Args:
             data: Stream data packet.
 
         Returns:
-            Dict[str, Union[str, float]]: Processed result.
+            Any: Processed result.
 
         Raises:
             Exception: If any stage execution fails.
@@ -388,7 +404,7 @@ class StreamAdapter(ProcessingPipeline):
         for stage in self.stages:
             try:
                 current = stage.process(current)
-            except Exception as e:
+            except (TypeError, KeyError, ValueError) as e:
                 raise Exception(
                     f"Error detected in {stage.title}: {e}"
                 )
@@ -398,16 +414,22 @@ class StreamAdapter(ProcessingPipeline):
 class NexusManager:
     """Manager to orchestrate and chain multiple pipelines.
 
-    Handles high-level coordination and provides performance metrics.
+    Handles high-level coordination, error recovery, and performance metrics.
     """
 
-    def __init__(self) -> None:
-        """Initializes Nexus Manager and its converters."""
+    def __init__(self, name: str = "NexusManager") -> None:
+        """Initializes Nexus Manager and its converters.
+
+        Args:
+            name: Human-readable identifier for this manager instance.
+        """
         self.pipelines: List[ProcessingPipeline] = []
+        self.backup_pipelines: List[ProcessingPipeline] = []
         self.converter = Base26Converter()
+        self.name = name
 
         print("Initializing Nexus Manager...")
-        print("Pipeline capacity: 20000 bottle/second\n")
+        print(f"Pipeline capacity: {PIPELINE_CAPACITY} bottle/second\n")
 
     def add_pipeline(self, pipeline: ProcessingPipeline) -> None:
         """Adds a pipeline instance to the orchestration list.
@@ -417,23 +439,44 @@ class NexusManager:
         """
         self.pipelines.append(pipeline)
 
-    def __find_my_name(self) -> str:
-        """Reflectively searches for the instance name in the caller's scope.
+    def add_backup_pipeline(self, pipeline: ProcessingPipeline) -> None:
+        """Registers a backup pipeline used during error recovery.
+
+        Args:
+            pipeline: The ProcessingPipeline object to use as backup.
+        """
+        self.backup_pipelines.append(pipeline)
+
+    def _try_backup(self, data: Any, index: int) -> Any:
+        """Attempts error recovery via a backup pipeline.
+
+        Args:
+            data: The data to pass to the backup pipeline.
+            index: Position used to select the appropriate backup.
 
         Returns:
-            str: The variable name of the current instance or 'Unknown'.
+            Any: Result produced by the backup pipeline.
+
+        Raises:
+            Exception: If no backup exists at the given index or it fails.
         """
-        try:
-            frame = sys._getframe(2)
-            for name, val in frame.f_locals.items():
-                if val is self:
-                    return name
-        except (ValueError, AttributeError):
-            pass
-        return "Unknown"
+        if index >= len(self.backup_pipelines):
+            raise Exception("No backup pipeline available for recovery.")
+
+        backup = self.backup_pipelines[index]
+        print(
+            "Recovery initiated: Switching to backup processor "
+            f"({backup.__class__.__name__})"
+        )
+        result = backup.process(data)
+        print("Recovery successful: Pipeline restored, processing resumed")
+        return result
 
     def chain_pipelines(self, data: Any) -> None:
         """Chains all registered pipelines to process data sequentially.
+
+        On failure, attempts recovery via the corresponding backup pipeline
+        before marking the chain as stopped.
 
         Args:
             data: The initial data input for the chain.
@@ -441,32 +484,42 @@ class NexusManager:
         Raises:
             ValueError: If no pipelines are registered in the manager.
         """
+        if not self.pipelines:
+            raise ValueError(
+                f"No Pipelines in NexusManager object {self.name}"
+            )
+
         error = False
         current = data
         chain: List[str] = []
         start_time = time.time()
 
-        if not self.pipelines:
-            raise ValueError(
-                f"No Pipelines in NexusManager object {self.__find_my_name()}"
-            )
-
         for i, pipe in enumerate(self.pipelines):
             p_id = f"Pipeline {self.converter.encode(i)}"
-            try:
-                adapter_type = pipe.__class__.__name__.removesuffix("Adapter")
-                print(f"Processing {adapter_type} data through pipeline...")
+            adapter_type = pipe.__class__.__name__.removesuffix("Adapter")
+            print(f"Processing {adapter_type} data through pipeline...")
 
+            try:
                 current = pipe.process(current)
                 chain.append(p_id)
                 print()
             except Exception as e:
-                chain.append(f"{p_id} (STOP)")
-                error = True
-                print(f"Error in pipeline ({pipe.__class__.__name__}): {e}\n")
-                break
+                print(
+                    f"Error in pipeline ({pipe.__class__.__name__}): {e}"
+                )
+                try:
+                    current = self._try_backup(current, i)
+                    chain.append(f"{p_id} (recovered)")
+                    print()
+                except Exception as recovery_err:
+                    chain.append(f"{p_id} (STOP)")
+                    error = True
+                    print(f"Recovery failed: {recovery_err}\n")
+                    break
 
-        run_time = random.uniform(0.5, 1) + round(time.time() - start_time, 1)
+        run_time = (
+            random.uniform(0.5, 1) + round(time.time() - start_time, 1)
+        )
         print("=== Pipelines Chaining Demo ===")
 
         if error:
@@ -481,8 +534,8 @@ class NexusManager:
         print("Chain result: 100%")
 
         if isinstance(current, dict) and "quantity" in current:
-            efficiency = (
-                round((float(current["quantity"]) / run_time) / 200, 2)
+            efficiency = round(
+                (float(current["quantity"]) / run_time) / 200, 2
             )
             print(
                 f"Performance: {efficiency}% efficiency, "
@@ -493,11 +546,12 @@ class NexusManager:
 def enterprise_pipeline() -> None:
     """Sets up and executes an enterprise-grade processing chain.
 
-    Coordinates CSV and JSON adapters with multiple processing stages.
+    Coordinates CSV and JSON adapters with multiple processing stages
+    and demonstrates error recovery via backup pipelines.
     """
     print("=== CODE NEXUS - ENTERPRISE PIPELINE SYSTEM ===\n")
 
-    manager = NexusManager()
+    manager = NexusManager(name="manager")
 
     pipes: Dict[ProcessingPipeline, List[ProcessingStage]] = {
         CSVAdapter("INPUT_ADAPTER"): [InputStage()],
@@ -505,13 +559,26 @@ def enterprise_pipeline() -> None:
         JSONAdapter("OUTPUT_ADAPTER"): [OutputStage()]
     }
 
+    backup_input = JSONAdapter("BACKUP_INPUT_ADAPTER")
+    backup_input.add_stage(InputStage(title="Backup input validation"))
+
+    backup_transform = JSONAdapter("BACKUP_TRANSFORM_ADAPTER")
+    backup_transform.add_stage(
+        TransformStage(title="Backup grinding and juicing")
+    )
+
+    backup_output = JSONAdapter("BACKUP_OUTPUT_ADAPTER")
+    backup_output.add_stage(
+        OutputStage(title="Backup juice canning and storage")
+    )
+
     print("Creating Data Processing Pipelines...")
     for i, (pipe, stages) in enumerate(pipes.items(), 1):
         try:
             print(f"+ Pipeline {i}: {pipe.__class__.__name__}")
             for j, stage in enumerate(stages, 1):
                 pipe.add_stage(stage)
-                print(f"    - Stage {j}: {stage.title}")
+                print(f"  - Stage {j}: {stage.title}")
             manager.add_pipeline(pipe)
             print()
         except Exception as e:
@@ -519,6 +586,10 @@ def enterprise_pipeline() -> None:
                 f"Error in pipeline ({pipe}) in addition stage "
                 f"({stage}): {e}\n"
             )
+
+    manager.add_backup_pipeline(backup_input)
+    manager.add_backup_pipeline(backup_transform)
+    manager.add_backup_pipeline(backup_output)
 
     try:
         print("=== Multi-Format Data Processing ===\n")
