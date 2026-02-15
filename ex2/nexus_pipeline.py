@@ -9,8 +9,8 @@ L_TO_ML = 1000
 BOTTLE_VOLUME_ML = 80
 MIN_JUICE_YIELD = 0.75
 MAX_JUICE_YIELD = 0.96
-MIN_WEIGHT_KG = 1000
-MAX_WEIGHT_KG = 10000
+MIN_WEIGHT_KG = 100
+MAX_WEIGHT_KG = 1000000
 ROTTEN_CHANCE = 30
 PIPELINE_CAPACITY = 20000
 
@@ -111,7 +111,7 @@ class InputStage:
                         fruits are rotten.
         """
         req_keys = ["fruit", "weight", "unit"]
-        print(f"Input:{'-'*10}\n{data}\n{'-'*16}")
+        print(f"Input: {data}")
 
         if not isinstance(data, dict):
             raise TypeError("Data must be a dictionary.")
@@ -144,7 +144,7 @@ class InputStage:
             print(
                 "The damaged fruit was discarded, "
                 f"the remaining quantity is "
-                f"{round(weight_in_grams / GRAM_TO_KG, 1)}kg"
+                f"{round(weight_in_grams / GRAM_TO_KG, 3)}kg"
             )
 
         result: Dict[str, Union[float, str]] = {
@@ -194,9 +194,7 @@ class TransformStage:
                 f"Weight of fruits is too low (min {MIN_WEIGHT_KG}kg)"
             )
         if weight > MAX_WEIGHT_KG:
-            raise ValueError(
-                "Weight of fruits is too high "
-                f"(max {MIN_WEIGHT_KG}kg)")
+            raise ValueError("Weight of fruits is too high (max 1t)")
 
         result: Dict[str, Union[str, float]] = {
             "unit": "L",
@@ -447,36 +445,46 @@ class NexusManager:
         """
         self.backup_pipelines.append(pipeline)
 
-    def _try_backup(self, data: Any, index: int) -> Any:
-        """Attempts error recovery via a backup pipeline.
+    def __try_all_backups(self, data: Any) -> Any:
+        """Tries every registered backup pipeline in order until one succeeds.
 
         Args:
-            data: The data to pass to the backup pipeline.
-            index: Position used to select the appropriate backup.
+            data: The data to pass to each backup pipeline.
 
         Returns:
-            Any: Result produced by the backup pipeline.
+            Any: Result produced by the first successful backup pipeline.
 
         Raises:
-            Exception: If no backup exists at the given index or it fails.
+            Exception: If no backups are registered or all of them fail.
         """
-        if index >= len(self.backup_pipelines):
-            raise Exception("No backup pipeline available for recovery.")
+        if not self.backup_pipelines:
+            raise Exception("No backup pipelines available for recovery.")
 
-        backup = self.backup_pipelines[index]
-        print(
-            "Recovery initiated: Switching to backup processor "
-            f"({backup.__class__.__name__})"
-        )
-        result = backup.process(data)
-        print("Recovery successful: Pipeline restored, processing resumed")
-        return result
+        last_err: Exception = Exception("All backup pipelines failed.")
+        for backup in self.backup_pipelines:
+            try:
+                print(
+                    "Recovery initiated: Switching to backup processor "
+                    f"({backup.__class__.__name__} / "
+                    f"{backup.pipeline_id})"
+                )
+                result = backup.process(data)
+                print(
+                    "Recovery successful: Pipeline restored, "
+                    "processing resumed"
+                )
+                return result
+            except Exception as err:
+                print(f"  Backup {backup.pipeline_id} failed: {err}\n")
+                last_err = err
+
+        raise last_err
 
     def chain_pipelines(self, data: Any) -> None:
         """Chains all registered pipelines to process data sequentially.
 
-        On failure, attempts recovery via the corresponding backup pipeline
-        before marking the chain as stopped.
+        On failure, tries every registered backup pipeline in order before
+        marking the chain as stopped.
 
         Args:
             data: The initial data input for the chain.
@@ -505,10 +513,10 @@ class NexusManager:
                 print()
             except Exception as e:
                 print(
-                    f"Error in pipeline ({pipe.__class__.__name__}): {e}"
+                    f"Error in pipeline ({pipe.__class__.__name__}): {e}\n"
                 )
                 try:
-                    current = self._try_backup(current, i)
+                    current = self.__try_all_backups(current)
                     chain.append(f"{p_id} (recovered)")
                     print()
                 except Exception as recovery_err:
@@ -559,18 +567,11 @@ def enterprise_pipeline() -> None:
         JSONAdapter("OUTPUT_ADAPTER"): [OutputStage()]
     }
 
-    backup_input = JSONAdapter("BACKUP_INPUT_ADAPTER")
-    backup_input.add_stage(InputStage(title="Backup input validation"))
+    backup1 = JSONAdapter("JSON_BACKUP_ADAPTER")
+    backup1.add_stage(InputStage(title="JSON Backup validation"))
 
-    backup_transform = JSONAdapter("BACKUP_TRANSFORM_ADAPTER")
-    backup_transform.add_stage(
-        TransformStage(title="Backup grinding and juicing")
-    )
-
-    backup_output = JSONAdapter("BACKUP_OUTPUT_ADAPTER")
-    backup_output.add_stage(
-        OutputStage(title="Backup juice canning and storage")
-    )
+    backup2 = CSVAdapter("JSON_BACKUP_ADAPTER")
+    backup2.add_stage(InputStage(title="JSON Backup validation"))
 
     print("Creating Data Processing Pipelines...")
     for i, (pipe, stages) in enumerate(pipes.items(), 1):
@@ -587,9 +588,8 @@ def enterprise_pipeline() -> None:
                 f"({stage}): {e}\n"
             )
 
-    manager.add_backup_pipeline(backup_input)
-    manager.add_backup_pipeline(backup_transform)
-    manager.add_backup_pipeline(backup_output)
+    manager.add_backup_pipeline(backup1)
+    manager.add_backup_pipeline(backup2)
 
     try:
         print("=== Multi-Format Data Processing ===\n")
