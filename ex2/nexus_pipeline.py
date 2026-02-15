@@ -67,6 +67,8 @@ class ProcessingStage(Protocol):
     Any class that provides a process() method qualifies as a stage.
     """
 
+    title: str
+
     def process(self, data: Any) -> Any:
         """Process the given data.
 
@@ -270,6 +272,7 @@ class ProcessingPipeline(ABC):
     def __init__(self) -> None:
         """Initializes the pipeline with an empty list of stages."""
         self.stages: List[ProcessingStage] = []
+        self.pipeline_id: str = "Pipeline"
 
     def add_stage(self, stage: ProcessingStage) -> None:
         """Registers a processing stage to the pipeline.
@@ -386,7 +389,7 @@ class StreamAdapter(ProcessingPipeline):
         super().__init__()
         self.pipeline_id = pipeline_id
 
-    def process(self, data: Any) -> Any:
+    def process(self, data: Any) -> Union[Any, List[Any]]:
         """Passes streaming data packets through pipeline stages.
 
         Args:
@@ -398,15 +401,17 @@ class StreamAdapter(ProcessingPipeline):
         Raises:
             Exception: If any stage execution fails.
         """
-        current = data
-        for stage in self.stages:
-            try:
-                current = stage.process(current)
-            except (TypeError, KeyError, ValueError) as e:
-                raise Exception(
-                    f"Error detected in {stage.title}: {e}"
-                )
-        return current
+        current: List[Any] = data if isinstance(data, list) else [data]
+
+        for i, _ in enumerate(current):
+            for stage in self.stages:
+                try:
+                    current[i] = stage.process(current[i])
+                except (TypeError, KeyError, ValueError) as e:
+                    raise Exception(
+                        f"Error detected in {stage.title}: {e}"
+                    )
+        return current if isinstance(data, list) else current[0]
 
 
 class NexusManager:
@@ -547,7 +552,7 @@ class NexusManager:
             )
             print(
                 f"Performance: {efficiency}% efficiency, "
-                f"{run_time}s total processing time\n"
+                f"{run_time:.1f}s total processing time\n"
             )
 
 
@@ -562,7 +567,7 @@ def enterprise_pipeline() -> None:
     manager = NexusManager(name="manager")
 
     pipes: Dict[ProcessingPipeline, List[ProcessingStage]] = {
-        CSVAdapter("INPUT_ADAPTER"): [InputStage()],
+        StreamAdapter("INPUT_ADAPTER"): [InputStage()],
         JSONAdapter("TRANSFORM_ADAPTER"): [TransformStage()],
         JSONAdapter("OUTPUT_ADAPTER"): [OutputStage()]
     }
@@ -593,13 +598,15 @@ def enterprise_pipeline() -> None:
 
     try:
         print("=== Multi-Format Data Processing ===\n")
-        manager.chain_pipelines("fruit,weight,unit\nGrapes,1200,kg")
+        manager.chain_pipelines(
+            {'fruit': 'Grapes', 'weight': '1200', 'unit': 'kg'}
+        )
     except Exception as e:
         print(f"Unexpected Error: {e}\n")
 
     try:
         print("=== Error Recovery Test ===\n")
-        manager.chain_pipelines("fruit,weight,99\nGrapes,1200,kg")
+        manager.chain_pipelines("fruit,weight,unit\nGrapes,1200,kg")
     except Exception as e:
         print(f"Unexpected Error: {e}\n")
 
