@@ -3,8 +3,8 @@
 Code Nexus - Polymorphism Testing Suite with Type Checking
 
 This testing suite validates your implementation of polymorphic data processing systems.
-It checks for proper method overriding, inheritance relationships, polymorphic behavior,
-and type annotations across all three exercises.
+It checks for proper method overriding, inheritance relationships,
+polymorphic behavior, and type annotations across all three exercises.
 
 Usage:
     python3 main.py [OPTIONS]

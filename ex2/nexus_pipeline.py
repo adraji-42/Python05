@@ -6,9 +6,13 @@ from typing import Any, Dict, List, Protocol, Union, runtime_checkable
 
 
 class Base26Converter:
-    """A converter for base-10 to base-26 (alphabetical) and vice versa."""
+    """A converter for base-10 to base-26 (alphabetical) and vice versa.
+
+    Used for generating spreadsheet-like column identifiers (A, B, C... Z, AA).
+    """
 
     def __init__(self) -> None:
+        """Initializes the converter with uppercase English alphabet."""
         self.alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         self.base = len(self.alphabet)
 
@@ -19,7 +23,7 @@ class Base26Converter:
             number: The integer to encode.
 
         Returns:
-            The base-26 string representation.
+            str: The base-26 string representation.
         """
         if number == 0:
             return self.alphabet[0]
@@ -39,7 +43,7 @@ class Base26Converter:
             b26_string: The string to decode.
 
         Returns:
-            The integer value.
+            int: The integer value.
         """
         number = 0
         for char in b26_string:
@@ -49,7 +53,11 @@ class Base26Converter:
 
 @runtime_checkable
 class ProcessingStage(Protocol):
-    """Protocol for processing stages using duck typing."""
+    """Protocol for processing stages using duck typing.
+
+    Ensures that any stage implementation
+    provides a title and a process method.
+    """
 
     title: str
 
@@ -60,32 +68,42 @@ class ProcessingStage(Protocol):
             data: The input data to process.
 
         Returns:
-            The processed data.
+            Any: The processed data.
         """
         ...
 
 
 class InputStage:
-    """Stage for input validation and parsing."""
+    """Stage for input validation and parsing.
+
+    Handles fruit cleaning, sorting, and unit conversion to kilograms.
+    """
 
     def __init__(self, title: str = "Cleaning and sorting fruits") -> None:
+        """Initializes the input stage with a default or custom title.
+
+        Args:
+            title: The descriptive title of the stage.
+        """
         self.title = title
 
     def process(
         self, data: Dict[str, Union[float, int, str]]
     ) -> Dict[str, Union[str, float]]:
-        """Process input fruit data.
+        """Process input fruit data and handles weight
+        reduction for rotten items.
 
         Args:
-            data: Raw fruit data dictionary.
+            data: Raw fruit data dictionary containing
+            'fruit', 'weight', and 'unit'.
 
         Returns:
-            Cleaned data in kilograms.
+            Dict[str, Union[str, float]]: Cleaned data standardized to kg.
 
         Raises:
             TypeError: If data is not a dictionary.
             KeyError: If required keys are missing.
-            ValueError: If unit is unknown or fruits are rotten.
+            ValueError: If unit is unknown or all fruits are rotten.
         """
         req_keys = ["fruit", "weight", "unit"]
 
@@ -120,7 +138,7 @@ class InputStage:
 
             print(
                 "The damaged fruit was discarded, "
-                f"the remaining quantity is {data["weight"] / 1000}kg"
+                f"the remaining quantity is {data['weight'] / 1000}kg"
             )
 
         result: Dict[str, Union[float, str]] = {
@@ -135,13 +153,32 @@ class InputStage:
 
 
 class TransformStage:
-    """Stage for data transformation and enrichment."""
+    """Stage for data transformation and enrichment.
+
+    Simulates the grinding and juicing process with random yield efficiency.
+    """
 
     def __init__(self, title: str = "Grinding and juicing the fruit") -> None:
+        """Initializes the transformation stage.
+
+        Args:
+            title: Descriptive title of the transformation stage.
+        """
         self.title = title
 
     def process(self, data: Dict[str, Any]) -> Dict[str, Union[str, float]]:
-        """Implement transformation logic here."""
+        """Transforms fruit weight into juice volume (Liters).
+
+        Args:
+            data: Dictionary containing fruit type and weight.
+
+        Returns:
+            Dict[str, Union[str, float]]: Results of the juicing process.
+
+        Raises:
+            KeyError: If weight is missing.
+            ValueError: If weight is outside allowed factory bounds.
+        """
         if "weight" not in data:
             raise KeyError("Input error: weight missing in TransformStage")
 
@@ -171,13 +208,31 @@ class TransformStage:
 
 
 class OutputStage:
-    """Stage for output formatting and delivery."""
+    """Stage for output formatting and delivery.
+
+    Handles the final packaging of juice into standardized bottles.
+    """
 
     def __init__(self, title: str = "Juice canning and storage") -> None:
+        """Initializes the output stage.
+
+        Args:
+            title: Descriptive title of the output stage.
+        """
         self.title = title
 
     def process(self, data: Dict[str, Any]) -> Dict[str, Union[str, float]]:
-        """Implement final output formatting here."""
+        """Calculates the number of bottles extracted from juice volume.
+
+        Args:
+            data: Dictionary containing quantity in Liters and raw weight.
+
+        Returns:
+            Dict[str, Union[str, float]]: Final extraction statistics.
+
+        Raises:
+            ValueError: If quantity is missing from the data.
+        """
         if "quantity" not in data:
             raise ValueError("Input error: quantity missing in OutputStage")
 
@@ -189,38 +244,64 @@ class OutputStage:
         print(
             f"Output: Extract {extract['quantity']} bottles of "
             f"{extract['fruit']} juice from {data['row weight']} kg of "
-            f"{data["fruit"]}"
+            f"{data['fruit']}"
         )
 
         return extract
 
 
 class ProcessingPipeline(ABC):
-    """Abstract base class for processing pipelines."""
+    """Abstract base class for processing pipelines.
+
+    Defines the structure for adding stages and executing them.
+    """
 
     def __init__(self) -> None:
+        """Initializes the pipeline with an empty list of stages."""
         self.stages: List[ProcessingStage] = []
 
     def add_stage(self, stage: ProcessingStage) -> None:
-        """Add a processing stage."""
+        """Registers a processing stage to the pipeline.
+
+        Args:
+            stage: An object that satisfies the ProcessingStage protocol.
+        """
         self.stages.append(stage)
 
     @abstractmethod
     def process(self, data: Any) -> Any:
-        """Abstract method for processing data."""
+        """Abstract method to define the data flow through the pipeline.
+
+        Args:
+            data: Input data to be processed.
+        """
         pass
 
 
 class JSONAdapter(ProcessingPipeline):
-    """Adapter for JSON data format."""
+    """Adapter for processing data in JSON/Dictionary format."""
 
     def __init__(self, pipeline_id: str) -> None:
+        """Initializes JSON adapter with a specific ID.
+
+        Args:
+            pipeline_id: Unique identifier for the pipeline.
+        """
         super().__init__()
         self.pipeline_id = pipeline_id
 
     def process(self, data: Dict[Any, Any]) -> Dict[str, Union[str, float]]:
-        """Process JSON data through stages."""
+        """Sequentially executes stages on JSON data.
 
+        Args:
+            data: Dictionary data input.
+
+        Returns:
+            Dict[str, Union[str, float]]: Final processed result.
+
+        Raises:
+            Exception: If any stage execution fails.
+        """
         current = data
         for stage in self.stages:
             try:
@@ -233,14 +314,30 @@ class JSONAdapter(ProcessingPipeline):
 
 
 class CSVAdapter(ProcessingPipeline):
-    """Adapter for CSV data format."""
+    """Adapter for processing data provided in CSV string format."""
 
     def __init__(self, pipeline_id: str) -> None:
+        """Initializes CSV adapter with a specific ID.
+
+        Args:
+            pipeline_id: Unique identifier for the pipeline.
+        """
         super().__init__()
         self.pipeline_id = pipeline_id
 
     def process(self, data: str) -> Dict[str, Union[str, float]]:
+        """Parses CSV string and passes it through processing stages.
 
+        Args:
+            data: CSV formatted string.
+
+        Returns:
+            Dict[str, Union[str, float]]: Processed data dictionary.
+
+        Raises:
+            ValueError: If CSV data is empty.
+            Exception: If any stage execution fails.
+        """
         if isinstance(data, str):
             table = [
                 line.split(',') for line in data.split('\n')
@@ -264,16 +361,29 @@ class CSVAdapter(ProcessingPipeline):
 
 
 class StreamAdapter(ProcessingPipeline):
-    """Adapter for streaming data."""
+    """Adapter for real-time streaming data processing."""
 
     def __init__(self, pipeline_id: str) -> None:
-        """Initialize with pipeline ID."""
+        """Initializes Stream adapter.
+
+        Args:
+            pipeline_id: Unique identifier for the stream.
+        """
         super().__init__()
         self.pipeline_id = pipeline_id
 
     def process(self, data: Any) -> Dict[str, Union[str, float]]:
-        """Process stream data through stages."""
+        """Passes streaming data packets through pipeline stages.
 
+        Args:
+            data: Stream data packet.
+
+        Returns:
+            Dict[str, Union[str, float]]: Processed result.
+
+        Raises:
+            Exception: If any stage execution fails.
+        """
         current = data
         for stage in self.stages:
             try:
@@ -286,9 +396,13 @@ class StreamAdapter(ProcessingPipeline):
 
 
 class NexusManager:
-    """Manager to orchestrate multiple pipelines."""
+    """Manager to orchestrate and chain multiple pipelines.
+
+    Handles high-level coordination and provides performance metrics.
+    """
 
     def __init__(self) -> None:
+        """Initializes Nexus Manager and its converters."""
         self.pipelines: List[ProcessingPipeline] = []
         self.converter = Base26Converter()
 
@@ -296,11 +410,19 @@ class NexusManager:
         print("Pipeline capacity: 20000 bottle/second\n")
 
     def add_pipeline(self, pipeline: ProcessingPipeline) -> None:
-        """Add a pipeline to the manager."""
+        """Adds a pipeline instance to the orchestration list.
+
+        Args:
+            pipeline: The ProcessingPipeline object to add.
+        """
         self.pipelines.append(pipeline)
 
     def __find_my_name(self) -> str:
-        """Search the caller's local scope for this instance's name."""
+        """Reflectively searches for the instance name in the caller's scope.
+
+        Returns:
+            str: The variable name of the current instance or 'Unknown'.
+        """
         try:
             frame = sys._getframe(2)
             for name, val in frame.f_locals.items():
@@ -311,7 +433,14 @@ class NexusManager:
         return "Unknown"
 
     def chain_pipelines(self, data: Any) -> None:
-        """Implement dynamic pipeline chaining logic using Base26 indexing."""
+        """Chains all registered pipelines to process data sequentially.
+
+        Args:
+            data: The initial data input for the chain.
+
+        Raises:
+            ValueError: If no pipelines are registered in the manager.
+        """
         error = False
         current = data
         chain: List[str] = []
@@ -362,7 +491,10 @@ class NexusManager:
 
 
 def enterprise_pipeline() -> None:
-    """Main function demonstrating dynamic chaining."""
+    """Sets up and executes an enterprise-grade processing chain.
+
+    Coordinates CSV and JSON adapters with multiple processing stages.
+    """
     print("=== CODE NEXUS - ENTERPRISE PIPELINE SYSTEM ===\n")
 
     manager = NexusManager()
@@ -404,6 +536,7 @@ def enterprise_pipeline() -> None:
 
 
 def main() -> None:
+    """Main execution entry point."""
     try:
         enterprise_pipeline()
     except Exception as e:
