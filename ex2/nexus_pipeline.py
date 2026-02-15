@@ -570,8 +570,8 @@ def enterprise_pipeline() -> None:
     backup1 = JSONAdapter("JSON_BACKUP_ADAPTER")
     backup1.add_stage(InputStage(title="JSON Backup validation"))
 
-    backup2 = CSVAdapter("JSON_BACKUP_ADAPTER")
-    backup2.add_stage(InputStage(title="JSON Backup validation"))
+    backup2 = CSVAdapter("CSV_BACKUP_ADAPTER")
+    backup2.add_stage(InputStage(title="CSV Backup validation"))
 
     print("Creating Data Processing Pipelines...")
     for i, (pipe, stages) in enumerate(pipes.items(), 1):
