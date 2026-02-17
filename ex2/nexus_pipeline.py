@@ -271,7 +271,7 @@ class ProcessingPipeline(ABC):
 
     def __init__(self) -> None:
         """Initializes the pipeline with an empty list of stages."""
-        self.stages: List[ProcessingStage] = []
+        self.__stages: List[ProcessingStage] = []
         self.pipeline_id: str = "Pipeline"
 
     def add_stage(self, stage: ProcessingStage) -> None:
@@ -280,7 +280,11 @@ class ProcessingPipeline(ABC):
         Args:
             stage: An object that satisfies the ProcessingStage protocol.
         """
-        self.stages.append(stage)
+        if isinstance(stage, ProcessingStage):
+            self.__stages.append(stage)
+
+    def get_stages(self) -> List[ProcessingStage]:
+        return self.__stages
 
     @abstractmethod
     def process(self, data: Any) -> Any:
@@ -317,7 +321,9 @@ class JSONAdapter(ProcessingPipeline):
             Exception: If any stage execution fails.
         """
         current = data
-        for stage in self.stages:
+        stages = self.get_stages()
+
+        for stage in stages:
             try:
                 current = stage.process(current)
             except (TypeError, KeyError, ValueError) as e:
@@ -355,6 +361,8 @@ class CSVAdapter(ProcessingPipeline):
             ValueError: If CSV data is empty.
             Exception: If any stage execution fails.
         """
+        stages = self.get_stages()
+
         if isinstance(data, str):
             table = [
                 line.split(',') for line in data.split('\n')
@@ -367,7 +375,7 @@ class CSVAdapter(ProcessingPipeline):
         else:
             current = data
 
-        for stage in self.stages:
+        for stage in stages:
             try:
                 current = stage.process(current)
             except (TypeError, KeyError, ValueError) as e:
@@ -401,10 +409,11 @@ class StreamAdapter(ProcessingPipeline):
         Raises:
             Exception: If any stage execution fails.
         """
+        stages = self.get_stages()
         current: List[Any] = data if isinstance(data, list) else [data]
 
         for i, _ in enumerate(current):
-            for stage in self.stages:
+            for stage in stages:
                 try:
                     current[i] = stage.process(current[i])
                 except (TypeError, KeyError, ValueError) as e:
@@ -426,10 +435,10 @@ class NexusManager:
         Args:
             name: Human-readable identifier for this manager instance.
         """
-        self.pipelines: List[ProcessingPipeline] = []
-        self.backup_pipelines: List[ProcessingPipeline] = []
-        self.converter = Base26Converter()
         self.name = name
+        self.__converter = Base26Converter()
+        self.__pipelines: List[ProcessingPipeline] = []
+        self.__backup_pipelines: List[ProcessingPipeline] = []
 
         print("Initializing Nexus Manager...")
         print(f"Pipeline capacity: {PIPELINE_CAPACITY} bottle/second\n")
@@ -440,7 +449,8 @@ class NexusManager:
         Args:
             pipeline: The ProcessingPipeline object to add.
         """
-        self.pipelines.append(pipeline)
+        if isinstance(pipeline, ProcessingPipeline):
+            self.__pipelines.append(pipeline)
 
     def add_backup_pipeline(self, pipeline: ProcessingPipeline) -> None:
         """Registers a backup pipeline used during error recovery.
@@ -448,7 +458,8 @@ class NexusManager:
         Args:
             pipeline: The ProcessingPipeline object to use as backup.
         """
-        self.backup_pipelines.append(pipeline)
+        if isinstance(pipeline, ProcessingPipeline):
+            self.__backup_pipelines.append(pipeline)
 
     def __try_all_backups(self, data: Any) -> Any:
         """Tries every registered backup pipeline in order until one succeeds.
@@ -462,11 +473,11 @@ class NexusManager:
         Raises:
             Exception: If no backups are registered or all of them fail.
         """
-        if not self.backup_pipelines:
+        if not self.__backup_pipelines:
             raise Exception("No backup pipelines available for recovery.")
 
         last_err: Exception = Exception("All backup pipelines failed.")
-        for backup in self.backup_pipelines:
+        for backup in self.__backup_pipelines:
             try:
                 print(
                     "Recovery initiated: Switching to backup processor "
@@ -497,7 +508,7 @@ class NexusManager:
         Raises:
             ValueError: If no pipelines are registered in the manager.
         """
-        if not self.pipelines:
+        if not self.__pipelines:
             raise ValueError(
                 f"No Pipelines in NexusManager object {self.name}"
             )
@@ -507,8 +518,8 @@ class NexusManager:
         chain: List[str] = []
         start_time = time.time()
 
-        for i, pipe in enumerate(self.pipelines):
-            p_id = f"Pipeline {self.converter.encode(i)}"
+        for i, pipe in enumerate(self.__pipelines):
+            p_id = f"Pipeline {self.__converter.encode(i)}"
             adapter_type = pipe.__class__.__name__.removesuffix("Adapter")
             print(f"Processing {adapter_type} data through pipeline...")
 
@@ -538,7 +549,7 @@ class NexusManager:
         if error:
             print(f"{' -> '.join(chain)}")
             completion = round(
-                ((len(chain) - 1) / len(self.pipelines)) * 100, 1
+                ((len(chain) - 1) / len(self.__pipelines)) * 100, 1
             )
             print(f"Chain result: {completion}%")
             return
@@ -618,7 +629,7 @@ def main() -> None:
     try:
         enterprise_pipeline()
     except Exception as e:
-        print(e, end="\n\n")
+        print(f"Unexpected Error: {e}\n")
 
 
 if __name__ == "__main__":

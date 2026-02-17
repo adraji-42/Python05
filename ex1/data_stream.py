@@ -410,8 +410,8 @@ class StreamProcessor:
 
     def __init__(self) -> None:
         """Initializes internal stream registries."""
-        self.streams: List[DataStream] = []
-        self.stream_data: Dict[DataStream, List[Any]] = {}
+        self.__streams: List[DataStream] = []
+        self.__stream_data: Dict[DataStream, List[Any]] = {}
 
     def add_stream(
         self, stream: DataStream, data_batch: List[Any]
@@ -423,19 +423,19 @@ class StreamProcessor:
             data_batch: The initial data batch for this stream.
         """
         if isinstance(stream, DataStream):
-            if stream not in self.streams:
-                self.streams.append(stream)
-            self.stream_data[stream] = data_batch
+            if stream not in self.__streams:
+                self.__streams.append(stream)
+            self.__stream_data[stream] = data_batch
 
     def process_all_streams(self) -> None:
         """Executes processing on all registered streams.
 
         Uses polymorphic calls to process_batch based on stream type.
         """
-        for stream in self.streams:
-            if stream in self.stream_data:
+        for stream in self.__streams:
+            if stream in self.__stream_data:
                 try:
-                    data_batch: List[Any] = self.stream_data[stream]
+                    data_batch: List[Any] = self.__stream_data[stream]
                     stream_type_name = (
                         stream.__class__.__name__.removesuffix("Stream")
                     )
@@ -463,7 +463,7 @@ class StreamProcessor:
             Dict[DataStream, int]: Map of streams to total items processed.
         """
         return {
-            stream: stream.total_processed for stream in self.streams
+            stream: stream.total_processed for stream in self.__streams
         }
 
     def filter_high_priority(self) -> str:
@@ -475,9 +475,9 @@ class StreamProcessor:
         sensor_alerts = 0
         large_transactions = 0
 
-        for stream in self.streams:
-            if stream in self.stream_data:
-                data: List[Any] = self.stream_data[stream]
+        for stream in self.__streams:
+            if stream in self.__stream_data:
+                data: List[Any] = self.__stream_data[stream]
                 filtered: List[Any] = stream.filter_data(
                     data, "high-priority"
                 )
@@ -514,7 +514,10 @@ def main() -> None:
     for stream, data in streams:
         processor.add_stream(stream, data)
 
-    processor.process_all_streams()
+    try:
+        processor.process_all_streams()
+    except Exception as e:
+        print(f"Unexpected Error {e}")
 
     print("=== Polymorphic Stream Processing ===")
     print("Processing mixed stream types through unified interface...\n")
